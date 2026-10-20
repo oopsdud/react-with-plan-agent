@@ -1,0 +1,40 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime databases, vector indexes, logs and generated artifacts
+data/
+*.db
+*.sqlite*
+*.log
+.tmp/
+artifacts/
+
+# Python environments and caches
+.venv/
+venv/
+.python_packages/
+.pip_cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Editor and local agent configuration
+.idea/
+.vscode/
+.agents/
+.codex/
+.aws/
+.DS_Store
+Thumbs.db
+node_modules/

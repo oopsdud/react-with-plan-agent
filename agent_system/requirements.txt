@@ -1,0 +1,18 @@
+# Agent System 依赖
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+sqlalchemy>=2.0.0
+chromadb>=0.4.18
+openai>=1.12.0
+python-dateutil>=2.8.2
+python-multipart>=0.0.6
+numpy>=1.26.0
+
+# 可选：本地Embedding
+# sentence-transformers>=2.2.0
+
+# 可选：LangGraph（当前未使用，预留）
+# langgraph>=0.0.20
+# langchain-core>=0.1.0

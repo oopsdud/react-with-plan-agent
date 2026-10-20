@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Agent System 对话与执行调试控制台">
+  <title>Agent Studio · 运行工作台</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="./"><span class="brand-icon">a<span>↗</span></span><span>Agent Studio<small>运行与编排工作台</small></span></a>
+    <div class="workspace"><span class="workspace-icon">W</span><div>开发工作空间<small>LOCAL WORKSPACE</small></div><span class="dot"></span></div>
+    <div class="nav-label">工作空间</div>
+    <nav aria-label="主导航">
+      <button class="nav active" data-view="chat"><span>◈</span>对话工作台<span class="nav-key">01</span></button>
+      <button class="nav" data-view="tools"><span>⌘</span>工具目录<span class="nav-key">02</span></button>
+      <button class="nav" data-view="docs"><span>▤</span>接口文档<span class="nav-key">03</span></button>
+    </nav>
+    <div class="sidebar-bottom"><div class="connection"><span id="connection-dot" class="dot muted"></span><span id="connection-text">正在连接后端</span><button id="refresh" title="重新检查连接" aria-label="重新检查连接">↻</button></div><div class="sidebar-note">ReAct with Plan <span>v0.1.0</span></div></div>
+  </aside>
+  <main>
+    <header class="topbar"><div class="breadcrumb">工作空间 <span>/</span> <strong id="page-title">对话工作台</strong></div><div class="header-actions"><span class="environment">● 本地开发</span><button id="settings-toggle" class="button subtle" aria-expanded="false">⚙ 连接设置</button></div></header>
+    <section id="settings" class="settings hidden" aria-label="连接设置">
+      <label>后端地址<input id="base-url" type="url" placeholder="留空使用当前站点，例如 http://127.0.0.1:8000"></label>
+      <label>调试用户 ID<input id="user-id" value="default_user" maxlength="100"></label>
+      <button id="save-settings" class="button primary">保存并连接</button><p>仅保存连接设置。用户 ID 是调试参数，不代表身份认证；切换用户会清空当前对话。</p>
+    </section>
+    <section id="view-chat" class="view">
+      <div class="page-heading"><div><div class="eyebrow">AGENT PLAYGROUND</div><h1>让想法开始执行<span class="accent">.</span></h1><p>与 Agent 对话，理解每一次决策与工具调用。</p></div><button id="new-chat" class="button subtle">＋ 新建对话</button></div>
+      <div id="runtime-banner" class="runtime-banner">正在读取运行配置…</div>
+      <div class="studio-grid">
+        <section class="chat-card card" aria-label="对话区">
+          <div class="card-header"><div><span class="small-dot"></span><strong>对话</strong><span class="muted-text"> / 当前会话</span></div><span class="chip">ReAct + Plan</span></div>
+          <div id="messages" class="messages" aria-live="polite" aria-busy="false">
+            <div id="welcome" class="welcome"><div class="welcome-symbol">✳</div><h2>今天，我们一起完成什么？</h2><p>输入一个任务，或从下面的示例开始。</p><div class="suggestions"><button data-prompt="查询张三的员工信息"><span>⌕</span><strong>查询信息</strong><small>查询张三的员工信息 ↗</small></button><button data-prompt="总结员工手册中的请假流程"><span>▤</span><strong>知识问答</strong><small>了解员工手册中的请假流程 ↗</small></button><button data-prompt="通知张三明天下午三点开会"><span>↗</span><strong>安排与通知</strong><small>通知张三明天下午三点开会 ↗</small></button></div></div>
+          </div>
+          <form id="chat-form" class="composer"><label class="sr-only" for="prompt">任务内容</label><textarea id="prompt" rows="3" maxlength="12000" placeholder="描述你的任务，例如：查询张三的员工信息…"></textarea><div class="composer-footer"><div class="mode-switch" aria-label="运行模式"><button type="button" class="mode selected" data-mode="chat" aria-pressed="true">完整执行</button><button type="button" class="mode" data-mode="intent" aria-pressed="false">仅识别意图</button></div><button id="send" class="button primary" type="submit">发送任务 <span>↑</span></button></div><div class="input-hint">Enter 发送 · Shift + Enter 换行 <span id="request-state">就绪</span></div></form>
+        </section>
+        <aside class="inspector card" aria-label="执行详情"><div class="card-header"><strong>执行详情</strong><span id="run-status" class="chip">等待任务</span></div><div id="execution" class="execution"><div class="inspector-empty"><span>◎</span><h3>每一步，都有迹可循</h3><p>发送任务后，在这里查看意图、耗时与工具执行结果。</p><div class="empty-flow">识别意图 <i>↓</i> 生成计划 <i>↓</i> 工具执行 <i>↓</i> 汇总结果</div></div></div></aside>
+      </div><div class="workspace-footer"><span>◉ 请求通过真实后端执行</span><span>响应完成后展示执行详情 · 当前不支持流式输出</span></div>
+    </section>
+    <section id="view-tools" class="view hidden"><div class="page-heading"><div><div class="eyebrow">TOOL REGISTRY</div><h1>工具目录<span class="accent">.</span></h1><p>查看后端实际注册的工具与执行配置。</p></div><button id="reload-tools" class="button subtle">↻ 刷新目录</button></div><div class="tools-toolbar"><label for="tool-search">搜索工具</label><input id="tool-search" type="search" placeholder="工具名称或描述"><span id="tool-count" class="chip">尚未加载</span></div><p class="notice">当前业务工具为 Mock 实现，工具返回不代表真实业务操作已发生。</p><div id="tools-list" class="tools-grid" aria-live="polite"></div></section>
+    <section id="view-docs" class="view hidden"><div class="page-heading"><div><div class="eyebrow">API REFERENCE</div><h1>连接每一个能力<span class="accent">.</span></h1><p>前端调用约定与后端接口定义，可直接用于联调。</p></div><a id="swagger-link" class="button primary" target="_blank" rel="noopener">打开 Swagger ↗</a></div><div class="docs-layout"><section class="card docs-card"><h2>后端 HTTP 接口</h2><p>JSON 请求与响应；接口地址以连接设置为准。</p><div id="endpoint-list"></div><h3>错误处理</h3><p>422 表示参数校验失败，404 表示工具不存在，500 表示服务异常。/chat 返回 HTTP 200 时仍需检查 success、error 和每个步骤的 status。</p><a id="openapi-link" target="_blank" rel="noopener">查看实时 OpenAPI JSON ↗</a></section><section class="card docs-card"><h2>前端调用示例</h2><pre><code>import { AgentAPI } from './api.mjs';
+
+const api = new AgentAPI(location.origin);
+const result = await api.chat({
+  user_input: '查询张三的员工信息',
+  user_id: 'default_user',
+  session_history: []
+});
+
+console.log(result.answer, result.steps);</code></pre><h3>交互约定</h3><p>对话只保留在当前页面内存中；连接地址和调试用户 ID 保存在浏览器。仅识别意图不会执行工具，也不会加入对话历史。</p><p>请求超时只停止前端等待，不能保证后端停止执行。写入任务状态不明时，请先核实结果再重试。</p><h3>仓库文档</h3><p>docs/backend-api.md<br>docs/frontend-api.md<br>docs/openapi.json</p></section></div></section>
+  </main>
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>
