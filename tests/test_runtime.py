@@ -18,7 +18,9 @@ from agent_system.core.intent_router import IntentDecision
 from agent_system.core.planner import Plan, PlanStep, SkeletonPlanner, PlanningError
 from agent_system.tools.registry import BaseTool, get_tool_registry
 from agent_system.utils.embedding_client import MockEmbeddingClient
-from agent_system.utils.llm_client import MockLLMClient, OpenAIClient
+from agent_system.utils.llm_client import OpenAIClient
+from agent_system.config.settings import Settings
+from fakes import FakeLLM
 
 
 def step(number, tool, dependencies=(), critical=True, params=None):
@@ -28,7 +30,7 @@ def step(number, tool, dependencies=(), critical=True, params=None):
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     def executor(self, tools):
-        executor = ReActExecutor(tools, MockLLMClient())
+        executor = ReActExecutor(tools, FakeLLM())
         executor.MAX_RETRIES = 0
         return executor
 
@@ -84,8 +86,8 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             executor._render_template({'missing': '{{slots.missing}}'}, {}, {})
 
     async def test_planner_rejects_partially_invalid_model_output(self):
-        llm = MockLLMClient()
-        llm.extract_structured = AsyncMock(return_value={'skeleton': ['query_user', 'not_registered']})
+        llm = FakeLLM()
+        llm.extract_structured = AsyncMock(return_value={'skeleton': ['web_search', 'not_registered']})
         planner = SkeletonPlanner(llm, MockEmbeddingClient())
         with self.assertRaises(PlanningError):
             await planner.plan('test', 'test', {})
@@ -101,17 +103,10 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.success)
         self.assertIn('timeout', result.error)
 
-    async def test_tool_validation_and_notification_contract(self):
-        registry = get_tool_registry()
-        invalid = await registry.get('query_user').run(names='张三')
+    async def test_only_search_is_registered(self):
+        self.assertEqual(get_tool_registry().list_tools(), ['web_search'])
+        invalid = await get_tool_registry().get('web_search').run(query=['bad'])
         self.assertFalse(invalid.success)
-        users = await registry.get('query_user').run(names=['张三'])
-        self.assertEqual(list(users.data['users']), ['u1'])
-        notification = await registry.get('send_notification').run(recipients=['u1'], contents={'u1': 'hello'})
-        self.assertTrue(notification.success)
-        self.assertEqual(notification.data['sent'], 1)
-        reminder = await registry.get('create_reminder').run(time='2026-10-21T15:00:00+08:00', content='meeting')
-        self.assertTrue(reminder.success)
 
     async def test_retry_count_and_original_plan_are_preserved(self):
         call = AsyncMock(side_effect=[RuntimeError('temporary network error'), {'ok': True}])
@@ -125,38 +120,17 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(original.steps[0].params_template, {})
 
     async def test_permission_failure_does_not_switch_tools(self):
-        executor = self.executor({'send_notification': AsyncMock(side_effect=RuntimeError('permission forbidden')),
-                                  'send_wechat': AsyncMock()})
-        result = await executor.execute(Plan(intent_id='test', steps=[step(1, 'send_notification')]), 'test')
+        executor = self.executor({'tool_a': AsyncMock(side_effect=RuntimeError('permission forbidden')),
+                                  'tool_b': AsyncMock()})
+        result = await executor.execute(Plan(intent_id='test', steps=[step(1, 'tool_a')]), 'test')
         self.assertEqual(result.status, 'failed')
-        executor.tools['send_wechat'].assert_not_awaited()
+        executor.tools['tool_b'].assert_not_awaited()
 
-    async def test_full_template_and_optional_memory_failure(self):
-        agent = AgentCore.__new__(AgentCore)
-        agent.tool_registry = get_tool_registry()
-        agent.intent_router = SimpleNamespace(
-            load_intents_from_db=Mock(),
-            route=AsyncMock(return_value=IntentDecision(intent_id='notify_event', complexity='complex', confidence=.9,
-                extracted_slots={'person': ['张三'], 'date': '2026-10-21', 'channel': 'email'})))
-        agent.planner = SkeletonPlanner(MockLLMClient(), MockEmbeddingClient())
-        agent.executor = self.executor({name: agent._create_tool_wrapper(name) for name in agent.tool_registry.list_tools()})
-        agent.episodic_memory = SimpleNamespace(
-            get_recommended_skeleton=AsyncMock(side_effect=RuntimeError('memory offline')),
-            store_episode=AsyncMock(side_effect=RuntimeError('memory offline')))
-        with patch('agent_system.core.agent.db_session', return_value=nullcontext(Mock())):
-            result = await agent.run('通知张三明天开会', 'test_user')
-        self.assertTrue(result['success'], result['error'])
-        self.assertTrue(all(r['status'] == 'succeeded' for r in result['steps']))
-        self.assertEqual(result['steps'][3]['result']['sent'], 1)
-        self.assertEqual(result['steps'][3]['params']['recipients'], ['u1'])
-        agent.intent_router.load_intents_from_db.assert_called_once()
 
 
 class ConfigurationTests(unittest.TestCase):
     def test_configured_model_is_used(self):
-        with patch('agent_system.utils.llm_client.settings') as settings:
-            settings.LLM_MODEL = 'configured-model'
-            settings.LLM_API_KEY = 'test-key'
+        with patch('agent_system.utils.llm_client.get_settings', return_value=Settings(_env_file=None, LLM_MODEL='configured-model', LLM_API_KEY='test-key')):
             self.assertEqual(OpenAIClient().model, 'configured-model')
 
     def test_fresh_sqlite_directory_created_at_startup(self):

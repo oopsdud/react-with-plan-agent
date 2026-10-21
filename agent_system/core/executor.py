@@ -440,14 +440,8 @@ class ReActExecutor:
     
     def _get_backup_tool(self, tool_name: str) -> Optional[str]:
         """获取备用工具"""
-        backup_map = {
-            "send_notification": "send_wechat",
-            "send_email": "send_wechat",
-            "query_user": None,  # 无备用
-        }
-        backup = backup_map.get(tool_name)
-        return backup if backup in self.tools else None
-    
+        return None  # No alternate bundled tools.
+
     async def _fix_params_with_llm(self, 
                                    step: PlanStep,
                                    exec_ctx: ExecutionContext,

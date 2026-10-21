@@ -9,6 +9,8 @@ openai>=1.12.0
 python-dateutil>=2.8.2
 python-multipart>=0.0.6
 numpy>=1.26.0
+httpx>=0.27.0,<1.0
+ddgs>=9.14.1,<10
 
 # 可选：本地Embedding
 # sentence-transformers>=2.2.0

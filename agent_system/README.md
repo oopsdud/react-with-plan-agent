@@ -1,10 +1,11 @@
-# ReAct with Plan Agent 后端
+# Agent 后端
 
-项目介绍、启动、配置、架构、测试与当前限制统一维护在 [根目录 README](../README.md)。
+这是通用 Agent 运行框架，不预设业务领域。目前只注册一个真实的网页检索工具 `web_search`，用于验证意图识别、规划、执行和总结链路。
 
-- [后端接口文档](../docs/backend-api.md)
-- [前端接口与交互文档](../docs/frontend-api.md)
-- [OpenAPI 协议快照](../docs/openapi.json)
-- [审核与修复记录](../docs/review.md)
+完整配置和启动步骤见 [中文 README](../README.md) / [English README](../README.en.md)。
 
-请从仓库根目录启动，访问 `/console/` 打开工作台，访问 `/docs` 调试接口。
+- [后端 API](../docs/api.md)
+- [架构与运行边界](../docs/architecture.md)
+- [前端开发](../docs/frontend.md)
+
+从仓库根目录执行 `scripts/dev-backend.ps1`，或在安装依赖并设置环境后运行 `python -m uvicorn agent_system.api.routes:app --reload --host 127.0.0.1 --port 8000`。

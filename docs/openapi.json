@@ -3,13 +3,343 @@
   "info": {
     "title": "Agent System",
     "description": "ReAct-with-Plan 智能体框架",
-    "version": "0.1.0"
+    "version": "0.3.0"
   },
   "paths": {
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Login",
+        "operationId": "login_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Me",
+        "operationId": "me_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Logout",
+        "operationId": "logout_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Register",
+        "operationId": "register_auth_register_post",
+        "responses": {
+          "403": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "List Conversations",
+        "operationId": "list_conversations_conversations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Create",
+        "operationId": "create_conversations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations/{conversation_id}": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Read",
+        "operationId": "read_conversations__conversation_id__get",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Delete",
+        "operationId": "delete_conversations__conversation_id__delete",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/config/model": {
+      "get": {
+        "tags": [
+          "Model configuration"
+        ],
+        "summary": "Read Config",
+        "operationId": "read_config_config_model_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConfigView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Model configuration"
+        ],
+        "summary": "Update Config",
+        "operationId": "update_config_config_model_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelSave"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConfigView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/config/model/models": {
+      "post": {
+        "tags": [
+          "Model configuration"
+        ],
+        "summary": "List Models",
+        "operationId": "list_models_config_model_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConnection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Root",
-        "description": "根路径",
         "operationId": "root__get",
         "responses": {
           "200": {
@@ -26,7 +356,6 @@
     "/health": {
       "get": {
         "summary": "Health",
-        "description": "健康检查",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -42,19 +371,82 @@
     },
     "/runtime": {
       "get": {
-        "tags": [
-          "Runtime"
-        ],
-        "summary": "Runtime Info",
-        "description": "返回不含密钥的运行配置；工具目前均为 Mock。",
-        "operationId": "runtime_info_runtime_get",
+        "summary": "Runtime",
+        "operationId": "runtime_runtime_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models": {
+      "get": {
+        "summary": "Models",
+        "operationId": "models_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools": {
+      "get": {
+        "summary": "Tools",
+        "operationId": "tools_tools_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/{tool_name}": {
+      "get": {
+        "summary": "Tool Info",
+        "operationId": "tool_info_tools__tool_name__get",
+        "parameters": [
+          {
+            "name": "tool_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tool Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuntimeResponse"
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -65,7 +457,6 @@
     "/chat": {
       "post": {
         "summary": "Chat",
-        "description": "聊天接口（完整Agent流程）",
         "operationId": "chat_chat_post",
         "requestBody": {
           "content": {
@@ -101,16 +492,15 @@
         }
       }
     },
-    "/intent": {
+    "/chat/stream": {
       "post": {
-        "summary": "Recognize",
-        "description": "意图识别接口（仅识别，不执行）",
-        "operationId": "recognize_intent_post",
+        "summary": "Chat Stream",
+        "operationId": "chat_stream_chat_stream_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IntentRequest"
+                "$ref": "#/components/schemas/ChatRequest"
               }
             }
           },
@@ -118,14 +508,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IntentResponse"
-                }
-              }
-            }
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -140,49 +523,26 @@
         }
       }
     },
-    "/tools": {
-      "get": {
-        "summary": "List Tools",
-        "description": "列出可用工具",
-        "operationId": "list_tools_tools_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolListResponse"
-                }
+    "/intent": {
+      "post": {
+        "summary": "Intent",
+        "operationId": "intent_intent_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
               }
             }
-          }
-        }
-      }
-    },
-    "/tools/{tool_name}": {
-      "get": {
-        "summary": "Get Tool Info",
-        "description": "获取工具信息",
-        "operationId": "get_tool_info_tools__tool_name__get",
-        "parameters": [
-          {
-            "name": "tool_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Tool Name"
-            }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolInfoResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -208,39 +568,51 @@
             "type": "string",
             "maxLength": 12000,
             "minLength": 1,
-            "title": "User Input",
-            "description": "用户输入"
+            "title": "User Input"
           },
-          "user_id": {
-            "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "User Id",
-            "description": "用户ID",
-            "default": "default_user"
-          },
-          "session_history": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
               },
-              "type": "object"
-            },
-            "type": "array",
-            "maxItems": 100,
-            "title": "Session History",
-            "description": "会话历史"
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "user_input"
         ],
-        "title": "ChatRequest",
-        "description": "聊天请求"
+        "title": "ChatRequest"
       },
       "ChatResponse": {
         "properties": {
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "message_id": {
+            "type": "integer",
+            "title": "Message Id"
+          },
           "trace_id": {
             "type": "string",
             "title": "Trace Id"
@@ -294,10 +666,50 @@
               }
             ],
             "title": "Error"
+          },
+          "sources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "rounds": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rounds"
+          },
+          "evidence_sufficient": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Sufficient"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           }
         },
         "type": "object",
         "required": [
+          "conversation_id",
+          "message_id",
           "trace_id",
           "success",
           "answer",
@@ -306,8 +718,20 @@
           "latency_ms",
           "error"
         ],
-        "title": "ChatResponse",
-        "description": "聊天响应"
+        "title": "ChatResponse"
+      },
+      "ConversationCreate": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "default": "新会话"
+          }
+        },
+        "type": "object",
+        "title": "ConversationCreate"
       },
       "HTTPValidationError": {
         "properties": {
@@ -322,172 +746,141 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
-      "IntentRequest": {
+      "LoginRequest": {
         "properties": {
-          "user_input": {
+          "username": {
             "type": "string",
-            "maxLength": 12000,
+            "maxLength": 64,
             "minLength": 1,
-            "title": "User Input"
+            "title": "Username"
           },
-          "session_history": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
+          "password": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "format": "password",
+            "title": "Password",
+            "writeOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "ModelConfigView": {
+        "properties": {
+          "base_url": {
+            "type": "string",
+            "title": "Base Url"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "api_key_configured": {
+            "type": "boolean",
+            "title": "Api Key Configured"
+          },
+          "json_mode": {
+            "type": "boolean",
+            "title": "Json Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "base_url",
+          "model",
+          "api_key_configured",
+          "json_mode"
+        ],
+        "title": "ModelConfigView"
+      },
+      "ModelConnection": {
+        "properties": {
+          "base_url": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Base Url"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "password",
+                "writeOnly": true
               },
-              "type": "object"
-            },
-            "type": "array",
-            "maxItems": 100,
-            "title": "Session History"
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
           }
         },
         "type": "object",
         "required": [
-          "user_input"
+          "base_url"
         ],
-        "title": "IntentRequest",
-        "description": "意图识别请求"
+        "title": "ModelConnection"
       },
-      "IntentResponse": {
+      "ModelList": {
         "properties": {
-          "intent_id": {
-            "type": "string",
-            "title": "Intent Id"
-          },
-          "complexity": {
-            "type": "string",
-            "title": "Complexity"
-          },
-          "confidence": {
-            "type": "number",
-            "title": "Confidence"
-          },
-          "is_multi_intent": {
-            "type": "boolean",
-            "title": "Is Multi Intent"
-          },
-          "secondary_intents": {
+          "models": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Secondary Intents"
-          },
-          "extracted_slots": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Extracted Slots"
-          },
-          "reasoning": {
-            "type": "string",
-            "title": "Reasoning"
-          },
-          "routing_path": {
-            "type": "string",
-            "title": "Routing Path"
+            "title": "Models"
           }
         },
         "type": "object",
         "required": [
-          "intent_id",
-          "complexity",
-          "confidence",
-          "is_multi_intent",
-          "secondary_intents",
-          "extracted_slots",
-          "reasoning",
-          "routing_path"
+          "models"
         ],
-        "title": "IntentResponse",
-        "description": "意图识别响应"
+        "title": "ModelList"
       },
-      "RuntimeResponse": {
+      "ModelSave": {
         "properties": {
-          "version": {
+          "base_url": {
             "type": "string",
-            "title": "Version"
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Base Url"
           },
-          "llm_mode": {
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "model": {
             "type": "string",
-            "title": "Llm Mode"
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Model"
           },
-          "llm_model": {
-            "type": "string",
-            "title": "Llm Model"
-          },
-          "embedding_provider": {
-            "type": "string",
-            "title": "Embedding Provider"
-          },
-          "embedding_note": {
-            "type": "string",
-            "title": "Embedding Note"
-          },
-          "tools_mode": {
-            "type": "string",
-            "title": "Tools Mode"
-          },
-          "streaming": {
+          "json_mode": {
             "type": "boolean",
-            "title": "Streaming"
+            "title": "Json Mode",
+            "default": true
           }
         },
         "type": "object",
         "required": [
-          "version",
-          "llm_mode",
-          "llm_model",
-          "embedding_provider",
-          "embedding_note",
-          "tools_mode",
-          "streaming"
+          "base_url",
+          "model"
         ],
-        "title": "RuntimeResponse"
-      },
-      "ToolInfoResponse": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description"
-          },
-          "timeout_seconds": {
-            "type": "integer",
-            "title": "Timeout Seconds"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "description",
-          "timeout_seconds"
-        ],
-        "title": "ToolInfoResponse"
-      },
-      "ToolListResponse": {
-        "properties": {
-          "tools": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Tools"
-          },
-          "count": {
-            "type": "integer",
-            "title": "Count"
-          }
-        },
-        "type": "object",
-        "required": [
-          "tools",
-          "count"
-        ],
-        "title": "ToolListResponse"
+        "title": "ModelSave"
       },
       "ValidationError": {
         "properties": {

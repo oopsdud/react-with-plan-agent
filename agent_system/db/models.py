@@ -109,3 +109,37 @@ class IntentRecognitionLog(Base):
     extracted_slots = Column(JSON, nullable=True)
     latency_ms = Column(Integer, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    username = Column(String(64), unique=True, nullable=False, index=True)
+    password_hash = Column(Text, nullable=False)
+    is_admin = Column(Boolean, nullable=False, default=False)
+
+class LoginSession(Base):
+    __tablename__ = 'login_sessions'
+    token_hash = Column(String(64), primary_key=True)
+    user_id = Column(String(64), ForeignKey('users.id'), nullable=False, index=True)
+    expires_at = Column(Float, nullable=False)
+
+class Conversation(Base):
+    __tablename__ = 'conversations'
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    user_id = Column(String(64), ForeignKey('users.id'), nullable=False, index=True)
+    title = Column(String(200), nullable=False, default='新会话')
+    model = Column(String(500), nullable=True)
+    active_run = Column(String(64), nullable=True)
+    updated_at = Column(Float, nullable=False)
+
+class ConversationMessage(Base):
+    __tablename__ = 'conversation_messages'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(String(64), ForeignKey('conversations.id'), nullable=False, index=True)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False, default='')
+    model = Column(String(500), nullable=True)
+    status = Column(String(20), nullable=False, default='completed')
+    result = Column(JSON, nullable=True)
+    created_at = Column(Float, nullable=False)

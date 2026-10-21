@@ -6,20 +6,26 @@ _CUSTOM_PACKAGES = Path(__file__).parent.parent.parent / ".python_packages"
 if _CUSTOM_PACKAGES.exists():
     sys.path.insert(0, str(_CUSTOM_PACKAGES))
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from functools import lru_cache
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 
 class Settings(BaseSettings):
     """应用配置"""
     
     # 应用
-    APP_NAME: str = "agent-system"
+    APP_NAME: str = "react-with-plan-agent"
     DEBUG: bool = False
-    CORS_ORIGINS: List[str] = ["http://127.0.0.1:8000", "http://localhost:8000"]
+    CORS_ORIGINS: List[str] = ["http://127.0.0.1:8000", "http://localhost:8000", "http://127.0.0.1:5173", "http://localhost:5173"]
     
+    DEFAULT_USER1_PASSWORD: str = 'AgentUser1!'
+    DEFAULT_USER2_PASSWORD: str = 'AgentUser2!'
+    DEFAULT_USER3_PASSWORD: str = 'AgentUser3!'
+    SESSION_TTL_SECONDS: int = Field(default=604800, ge=60)
+    COOKIE_SECURE: bool = False
+
     # 数据库 - 本地开发默认SQLite
     DATABASE_URL: str = "sqlite:///./data/agent.db"
     
@@ -38,9 +44,21 @@ class Settings(BaseSettings):
     LLM_API_KEY: Optional[str] = None
     LLM_BASE_URL: Optional[str] = None
     LLM_MODEL: str = "gpt-4o-mini"
+    LLM_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=600)
+    LLM_JSON_MODE: bool = True
+
+    # One bundled tool; both providers need no dedicated search API key.
+    SEARCH_PROVIDER: Literal['ddgs','searxng'] = 'ddgs'
+    DDGS_BACKEND: str = 'auto'
+    DDGS_REGION: str = 'us-en'
+    DDGS_PROXY: Optional[str] = None
+    SEARXNG_BASE_URL: Optional[str] = None
+    SEARCH_SAFESEARCH: Literal['off','moderate','on'] = 'moderate'
+    SEARCH_TIMEOUT_SECONDS: int = Field(default=20, ge=1, le=120)
+    EPISODIC_MEMORY_ENABLED: bool = False
     
     # Embedding配置
-    EMBEDDING_PROVIDER: str = "local"  # local / api
+    EMBEDDING_PROVIDER: str = "api"  # optional memory only; disabled by default
     EMBEDDING_MODEL: str = "BAAI/bge-m3"
     EMBEDDING_API_KEY: Optional[str] = None
     EMBEDDING_BASE_URL: Optional[str] = None
@@ -58,11 +76,17 @@ class Settings(BaseSettings):
     EPISODIC_MEMORY_TTL_DAYS: int = 7
     EPISODIC_MEMORY_PER_INTENT_LIMIT: int = 20
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).resolve().parents[2] / ".env",
+        env_file_encoding="utf-8", extra="ignore",
+    )
+
+
+def credential_configured(value: Optional[str]) -> bool:
+    return bool(value and value.strip() and not value.upper().startswith(("YOUR_", "REPLACE_", "<")))
 
 
 @lru_cache()
 def get_settings() -> Settings:
-    return Settings()
+    from agent_system.config.model_config import load_model_config
+    return Settings(**load_model_config())

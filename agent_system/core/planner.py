@@ -39,39 +39,16 @@ class PlanningError(Exception):
 class SkeletonPlanner:
     """骨架规划器"""
     
-    # 预定义计划模板（程序记忆）
     PLAN_TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
-        "notify_event": [
-            {"step_id": 1, "tool_name": "query_user", "description": "查询用户信息", "params_template": {"names": "{{slots.person}}"}, "depends_on": []},
-            {"step_id": 2, "tool_name": "query_events", "description": "查询用户事件", "params_template": {"user_ids": "{{steps.1.result.user_ids}}", "date": "{{slots.date}}"}, "depends_on": [1]},
-            {"step_id": 3, "tool_name": "generate_content", "description": "生成通知内容", "params_template": {"users": "{{steps.1.result.users}}", "events": "{{steps.2.result.events}}"}, "depends_on": [1, 2]},
-            {"step_id": 4, "tool_name": "send_notification", "description": "发送通知", "params_template": {"recipients": "{{steps.3.result.recipients}}", "contents": "{{steps.3.result.contents}}", "channel": "{{slots.channel}}"}, "depends_on": [3]},
-            {"step_id": 5, "tool_name": "log_result", "description": "记录结果", "params_template": {"task_type": "notify_event", "results": "{{steps.4.result}}"}, "depends_on": [4], "is_critical": False},
-        ],
-        "greeting": [
-            {"step_id": 1, "tool_name": "query_user", "description": "查询用户信息", "params_template": {"names": "{{slots.person}}"}, "depends_on": []},
-            {"step_id": 2, "tool_name": "query_birthday", "description": "查询生日信息", "params_template": {"user_ids": "{{steps.1.result.user_ids}}"}, "depends_on": [1]},
-            {"step_id": 3, "tool_name": "generate_greeting", "description": "生成祝福内容", "params_template": {"users": "{{steps.1.result.users}}", "birthdays": "{{steps.2.result}}"}, "depends_on": [1, 2]},
-            {"step_id": 4, "tool_name": "send_notification", "description": "发送祝福", "params_template": {"recipients": "{{steps.3.result.recipients}}", "contents": "{{steps.3.result.contents}}", "channel": "email"}, "depends_on": [3]},
-        ],
-        "ingest_document": [
-            {"step_id": 1, "tool_name": "parse_document", "description": "解析文档", "params_template": {"file_path": "{{slots.file_path}}"}, "depends_on": []},
-            {"step_id": 2, "tool_name": "chunk_text", "description": "文本分块", "params_template": {"text": "{{steps.1.result.text}}"}, "depends_on": [1]},
-            {"step_id": 3, "tool_name": "embed_chunks", "description": "向量化", "params_template": {"chunks": "{{steps.2.result.chunks}}"}, "depends_on": [2]},
-            {"step_id": 4, "tool_name": "store_knowledge", "description": "入库", "params_template": {"embeddings": "{{steps.3.result.embeddings}}", "chunks": "{{steps.2.result.chunks}}", "metadata": {"source": "{{slots.file_path}}"}}, "depends_on": [3]},
-        ],
-        "knowledge_qa": [
-            {"step_id": 1, "tool_name": "query_memory", "description": "查询工作记忆", "params_template": {"query": "{{slots.query}}"}, "depends_on": []},
-            {"step_id": 2, "tool_name": "search_knowledge", "description": "检索知识库", "params_template": {"query": "{{slots.query}}", "context": "{{steps.1.result.context}}"}, "depends_on": [1]},
-            {"step_id": 3, "tool_name": "generate_answer", "description": "生成答案", "params_template": {"query": "{{slots.query}}", "context": "{{steps.1.result.context}}", "retrieved": "{{steps.2.result.chunks}}"}, "depends_on": [2]},
-        ],
+        "web_search": [{"step_id": 1, "tool_name": "web_search", "description": "搜索网页",
+                        "params_template": {"query": "{{slots.query}}"}, "depends_on": []}]
     }
-    
+
     def __init__(self, llm_client: Optional[BaseLLMClient] = None,
                  embedding_client: Optional[BaseEmbeddingClient] = None,
                  available_tools: Optional[List[str]] = None):
         self.llm = llm_client or get_llm_client()
-        self.embedding = embedding_client or get_embedding_client()
+        self.embedding = embedding_client
         if available_tools is None:
             from agent_system.tools.registry import get_tool_registry
             available_tools = get_tool_registry().list_tools()
@@ -86,6 +63,8 @@ class SkeletonPlanner:
         生成计划骨架
         """
         extracted_slots = {**extracted_slots, "original_input": user_input}
+        if intent_id == "web_search":
+            extracted_slots["query"] = extracted_slots.get("query") or user_input
         # Step 1: 检查模板命中
         if intent_id in self.PLAN_TEMPLATES:
             template = self.PLAN_TEMPLATES[intent_id]
@@ -158,10 +137,10 @@ class SkeletonPlanner:
 {few_shot_text if few_shot_text else "无"}
 
 要求:
-1. 仅输出步骤名列表，如 ["query_user", "send_notification"]
+1. 仅输出步骤名列表，如 ["web_search"]
 2. 步骤按执行顺序排列
 3. 只使用可用工具列表中的工具
-4. 步骤数量2-5个
+4. 步骤数量1-5个
 5. 如果任务无法完成或超出能力范围，返回空列表 []
 
 输出JSON格式:

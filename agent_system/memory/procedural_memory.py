@@ -49,37 +49,10 @@ class ProceduralMemory:
         
         # ========== 计划模板 ==========
         self._plan_templates = {
-            "notify_event": [
-                {"step_id": 1, "tool_name": "query_user", "params_template": {"names": "{{slots.person}}"}, "depends_on": []},
-                {"step_id": 2, "tool_name": "query_events", "params_template": {"user_ids": "{{steps.1.result.user_ids}}", "date": "{{slots.date}}"}, "depends_on": [1]},
-                {"step_id": 3, "tool_name": "generate_content", "params_template": {"users": "{{steps.1.result.users}}", "events": "{{steps.2.result.events}}"}, "depends_on": [1, 2]},
-                {"step_id": 4, "tool_name": "send_notification", "params_template": {"recipients": "{{steps.3.result.recipients}}", "contents": "{{steps.3.result.contents}}"}, "depends_on": [3]},
-            ],
-            "greeting": [
-                {"step_id": 1, "tool_name": "query_user", "params_template": {"names": "{{slots.person}}"}, "depends_on": []},
-                {"step_id": 2, "tool_name": "query_birthday", "params_template": {"user_ids": "{{steps.1.result.user_ids}}"}, "depends_on": [1]},
-                {"step_id": 3, "tool_name": "generate_greeting", "params_template": {"users": "{{steps.1.result.users}}"}, "depends_on": [1, 2]},
-                {"step_id": 4, "tool_name": "send_notification", "params_template": {"recipients": "{{steps.3.result.recipients}}"}, "depends_on": [3]},
-            ],
-            "ingest_document": [
-                {"step_id": 1, "tool_name": "parse_document", "params_template": {"file_path": "{{slots.file_path}}"}, "depends_on": []},
-                {"step_id": 2, "tool_name": "chunk_text", "params_template": {"text": "{{steps.1.result.text}}"}, "depends_on": [1]},
-                {"step_id": 3, "tool_name": "embed_chunks", "params_template": {"chunks": "{{steps.2.result.chunks}}"}, "depends_on": [2]},
-                {"step_id": 4, "tool_name": "store_knowledge", "params_template": {"chunks": "{{steps.2.result.chunks}}", "embeddings": "{{steps.3.result.embeddings}}"}, "depends_on": [3]},
-            ],
-            "knowledge_qa": [
-                {"step_id": 1, "tool_name": "query_memory", "params_template": {"query": "{{slots.query}}"}, "depends_on": []},
-                {"step_id": 2, "tool_name": "search_knowledge", "params_template": {"query": "{{slots.query}}"}, "depends_on": [1]},
-                {"step_id": 3, "tool_name": "generate_answer", "params_template": {"query": "{{slots.query}}", "retrieved": "{{steps.2.result.chunks}}"}, "depends_on": [2]},
-            ],
-            "simple_reminder": [
-                {"step_id": 1, "tool_name": "create_reminder", "params_template": {"time": "{{slots.datetime}}", "content": "{{slots.content}}"}, "depends_on": []},
-            ],
-            "query_employee": [
-                {"step_id": 1, "tool_name": "query_employee", "params_template": {"name": "{{slots.name}}", "department": "{{slots.department}}"}, "depends_on": []},
-            ],
+            "web_search": [{"step_id": 1, "tool_name": "web_search",
+                            "params_template": {"query": "{{slots.query}}"}, "depends_on": []}]
         }
-        
+
         # ========== 提示词模板 ==========
         self._prompt_templates = {
             "intent_recognition": PromptTemplate(
@@ -120,10 +93,10 @@ class ProceduralMemory:
 {{few_shot_examples}}
 
 要求:
-1. 仅输出步骤名列表，如 ["query_user", "send_notification"]
+1. 仅输出步骤名列表，如 ["web_search"]
 2. 步骤按执行顺序排列
 3. 只使用可用工具列表中的工具
-4. 步骤数量2-5个
+4. 步骤数量1-5个
 
 输出JSON格式:
 {{"skeleton": ["step1", "step2", ...]}}""",
@@ -197,26 +170,8 @@ class ProceduralMemory:
         }
         
         # ========== 工具使用模式 ==========
-        self._tool_patterns = {
-            "send_notification": {
-                "backup_tools": ["send_wechat", "send_email"],
-                "rate_limit": {"wechat": 30, "email": 60},
-                "retry_strategy": "exponential_backoff",
-                "max_retries": 3,
-            },
-            "query_user": {
-                "backup_tools": [],
-                "cache_ttl": 300,
-                "retry_strategy": "immediate",
-                "max_retries": 2,
-            },
-            "search_knowledge": {
-                "backup_tools": ["bm25_search"],
-                "hybrid_search": True,
-                "rrf_k": 60,
-            },
-        }
-    
+        self._tool_patterns = {"web_search": {"backup_tools": [], "max_retries": 2}}
+
     def get_plan_template(self, intent_id: str) -> Optional[List[Dict[str, Any]]]:
         """获取计划模板"""
         return self._plan_templates.get(intent_id)
