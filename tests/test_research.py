@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import unittest
 from pathlib import Path
 from contextlib import nullcontext
@@ -47,6 +47,15 @@ class ResearchTests(unittest.IsolatedAsyncioTestCase):
         result,tool,_,_=await self.run_case([{'sufficient':False,'next_query':f'query {i}'} for i in range(3)],failure=True)
         self.assertEqual(tool.await_count,3);self.assertFalse(result['success'])
         self.assertTrue(result['error']);self.assertFalse(result['evidence_sufficient'])
+    async def test_review_service_failure_degrades_to_unverified_sources(self):
+        from agent_system.utils.llm_client import LLMError
+        result,tool,llm,_=await self.run_case([LLMError('provider down','UPSTREAM_UNAVAILABLE',True)])
+        self.assertTrue(result['success']);self.assertTrue(result['degraded'])
+        self.assertFalse(result['evidence_sufficient'])
+        self.assertIn('尚未完成核验',result['answer'])
+        self.assertEqual(result['error_info']['code'],'UPSTREAM_UNAVAILABLE')
+        llm.chat.assert_not_awaited()
+
     async def test_general_chat_does_not_search(self):
         result,tool,llm,_=await self.run_case([],intent='general')
         tool.assert_not_awaited();llm.extract_structured.assert_not_awaited()

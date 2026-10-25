@@ -4,6 +4,7 @@ import importlib.util
 import math
 from urllib.parse import urlsplit
 import httpx
+from agent_system.runtime import get_runtime
 
 
 def searxng_url(settings):
@@ -101,7 +102,7 @@ def normalize_results(rows,max_results):
 
 async def search_web(query,max_results,settings,transport=None):
     if settings.SEARCH_PROVIDER=='ddgs':
-        rows=await asyncio.wait_for(asyncio.to_thread(ddgs_search,query,max_results,settings),timeout=settings.SEARCH_TIMEOUT_SECONDS+1)
+        rows=await asyncio.wait_for(get_runtime().search_threads.run(ddgs_search,query,max_results,settings),timeout=settings.SEARCH_TIMEOUT_SECONDS+1)
     else:
         rows=await searxng_search(query,settings,transport)
     results=normalize_results(rows,max_results)

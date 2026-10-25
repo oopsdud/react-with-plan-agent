@@ -1,4 +1,5 @@
 """ReAct-with-Plan runtime with evidence review and bounded search refinement."""
+import asyncio
 import json
 import logging
 import time
@@ -6,6 +7,7 @@ import uuid
 from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 from agent_system.db.session import db_session
+from agent_system.runtime.errors import ServiceError, public_error
 from agent_system.utils.llm_client import get_llm_client
 from agent_system.core.intent_router import IntentRouter
 from agent_system.core.planner import SkeletonPlanner, Plan, PlanStep
@@ -54,7 +56,9 @@ class AgentCore:
             if on_event:await on_event(event)
         try:
             await emit({'type':'status','phase':'routing','message':'正在理解任务'})
-            with db_session() as db:self.intent_router.load_intents_from_db(db)
+            def load_intents():
+                with db_session() as db:self.intent_router.load_intents_from_db(db)
+            await asyncio.to_thread(load_intents)
             decision=await self.intent_router.route(user_input,history)
             intent=decision.model_dump()
             await emit({'type':'intent','intent':intent})
@@ -116,11 +120,19 @@ class AgentCore:
                 else:answer+=await self.llm.chat(messages)
             failed=bool(steps) and not any(step['status']=='succeeded' for step in steps)
             if failed:error='所有检索尝试均失败，请检查网络或搜索服务。'
-            result={'trace_id':trace_id,'success':not failed,'answer':answer,'intent':intent,'steps':steps,'latency_ms':int((time.monotonic()-started)*1000),'error':error,'sources':list(sources.values()),'rounds':rounds,'evidence_sufficient':sufficient if decision.intent_id=='web_search' else None,'model':getattr(self.llm,'model',None)}
+            result={'error_info':ServiceError('SEARCH_UNAVAILABLE',error,503,True,5).public() if failed else None,'trace_id':trace_id,'success':not failed,'answer':answer,'intent':intent,'steps':steps,'latency_ms':int((time.monotonic()-started)*1000),'error':error,'sources':list(sources.values()),'rounds':rounds,'evidence_sufficient':sufficient if decision.intent_id=='web_search' else None,'model':getattr(self.llm,'model',None)}
         except Exception as exception:
-            error=str(exception)
-            result={'trace_id':trace_id,'success':False,'answer':answer or '任务执行失败：'+error,'intent':intent,'steps':steps,'latency_ms':int((time.monotonic()-started)*1000),'error':error,'sources':list(sources.values()),'rounds':rounds,'evidence_sufficient':False,'model':getattr(self.llm,'model',None)}
+            info=public_error(exception)
+            error=info['message']
+            logger.warning('agent_failure trace=%s error_type=%s code=%s',trace_id,type(exception).__name__,info['code'])
+            if sources:
+                # A dependency failure must not turn public snippets into a fabricated answer.
+                answer='服务暂时不可用，已降级为来源摘要展示。以下材料尚未完成核验，不能视作完整答案。\n\n'+ '\n\n'.join(f"[{i}] {row['title']}\n{row.get('content','')[:700]}\n{row['url']}" for i,row in enumerate(sources.values(),1))
+                result={'trace_id':trace_id,'success':True,'answer':answer,'intent':intent,'steps':steps,'latency_ms':int((time.monotonic()-started)*1000),'error':None,'error_info':info,'sources':list(sources.values()),'rounds':rounds,'evidence_sufficient':False,'degraded':True,'model':getattr(self.llm,'model',None)}
+                await emit({'type':'status','phase':'degraded','message':'已降级为未核验来源摘要'})
+                return result
+            result={'trace_id':trace_id,'success':False,'answer':answer or '任务执行失败：'+error,'intent':intent,'steps':steps,'latency_ms':int((time.monotonic()-started)*1000),'error':error,'error_info':info,'sources':list(sources.values()),'rounds':rounds,'evidence_sufficient':False,'model':getattr(self.llm,'model',None)}
         return result
 
-async def run_agent(user_input,user_id='default_user',session_history=None,model=None,on_event=None):
-    return await AgentCore(model=model).run(user_input,user_id,session_history,on_event)
+async def run_agent(user_input,user_id='default_user',session_history=None,model=None,on_event=None,llm_client=None):
+    return await AgentCore(model=model,llm_client=llm_client).run(user_input,user_id,session_history,on_event)

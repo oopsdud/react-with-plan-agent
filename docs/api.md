@@ -1,4 +1,4 @@
-﻿# 后端 API 文档
+# 后端 API 文档
 
 [中文 README](../README.md) · [English README](../README.en.md) · [前端契约](frontend.md)
 
@@ -58,7 +58,7 @@
 
 示例省略步骤与意图元数据，精确字段以实际结果及 OpenAPI 为准。`message_id` 是本轮 assistant 消息 ID。`evidence_sufficient` 对普通对话为 null；`success=true` 可以伴随证据不足，回答会明确说明局限，不能将运行成功解释成完整答案已证实。全部搜索失败为 `success=false`；正常空结果与工具故障区分。
 
-会话摘要包含 `id,title,model,updated_at,running`；详情还含 `messages`，消息字段为 `id,role,content,model,status,result,created_at`。状态包含 completed、pending、failed、interrupted。上下文只取当前会话最近 50 条 completed 消息；失败和中断轮次不传给模型。
+会话摘要包含 `id,title,model,updated_at,running`；详情还含 `messages`，消息字段为 `id,role,content,model,status,result,created_at`。状态包含 completed、pending、failed、interrupted。上下文只取当前会话最近 50 条 completed 消息，并限制总字符数；失败和中断轮次不传给模型。
 
 ## 增量协议
 
@@ -75,7 +75,7 @@
 {"type":"done","result":{"完整字段":"同 /chat"}}
 ```
 
-空闲约 10 秒发送 `{"type":"heartbeat"}`。`done.result` 是最终权威结果，并已持久化；流程失败可通过 `done.result.success=false` 表达。保存等异常会发送 `type=error,message`；没有 done 的 EOF 视作流中断。浏览器断开后任务继续执行并保存，可 GET 会话恢复，不会自动取消。同一会话重复执行返回 409，独立会话互不阻塞。后端重启将 pending 轮次标为 interrupted；不是断点恢复。无任务取消端点。
+空闲约 10 秒发送 `{"type":"heartbeat"}`。`done.result` 是最终权威结果，并已持久化；流程失败可通过 `done.result.success=false` 表达。保存等异常会发送 `type=error,message`；没有 done 的 EOF 视作流中断。浏览器断开后任务继续执行并保存，可 GET 会话恢复，不会自动取消。同一会话重复执行返回 409，独立会话互不阻塞。后端重启将 pending 轮次标为 interrupted；不是断点恢复。可通过 `/runs/{id}/cancel` 取消自己的任务。
 
 ## 模型配置
 
@@ -95,4 +95,22 @@
 - 200 + success=false：执行失败，仍保留已执行步骤、来源及记录。
 - 通用 DAG 中失败阻塞依赖，独立分支继续；关键失败使整体失败。检索轮次专门禁用额外重试以满足总数上限。
 
-面向本地单进程调试，不提供公网所需限流、开放注册、密码管理和分布式队列。
+面向单进程调试，已加入用户限流与有界调度；尚无开放注册、SSO 和分布式队列。
+
+## 0.4 并发与任务接口
+
+执行请求可额外提供 `client_request_id`（8–128 字符，建议 UUID）。它按认证用户去重；重复请求返回 409/DUPLICATE_REQUEST，已有 run_id 在 error.details.run_id；编号对应不同内容返回 IDEMPOTENCY_CONFLICT。保留窗口 24 小时（进行中的任务不会因过期放行）。没有自动 200 结果重放，读取原任务及所属会话即可恢复。
+
+- `GET /runs/{run_id}`：仅所有者；返回 id、conversation_id、message_id、state、created_at、started_at、finished_at、error_code。外部任务返回 404。
+- `POST /runs/{run_id}/cancel`：仅所有者；返回 cancellation_requested。取消请求是协作式的，最终状态以任务查询为准；已经完成或正在提交结果时不会再次取消。
+- `GET /operations`：仅管理员，返回调度总数、依赖熔断状态、HTTP 处理数、结果保存失败计数，不返回其他用户消息。
+- `GET /ready`：公开就绪探针，检查排空状态及数据库。`/health` 仅存活，不检测模型配额。
+- `GET /conversations/{id}?before_id=123&limit=100`：默认最近 100 条，最多 200，返回 messages（时间正序）、has_more、next_before_id。消息仍按当前用户会话归属过滤。会话摘要增加 run_id，便于刷新后取消。
+
+最终 ChatResult 增加 `run_id,run_state,queue_wait_ms,degraded,error_info`。生命周期为 queued → running → succeeded/failed/cancelled/timed_out/expired/interrupted。排队超时及执行失败在已受理的 /chat 返回 200 + success=false；流式返回 done.result。受理前的容量拒绝为 429，包含 Retry-After。已受理任务的返回延迟可能超过普通短 HTTP 超时，前端应优先用 /chat/stream 或查询任务。
+
+统一 HTTP 错误：`{detail,error:{code,message,retryable,retry_after,details?},request_id}`，带 X-Request-ID。常见新增码：USER_CAPACITY_EXCEEDED、QUEUE_FULL、USER_RATE_LIMITED、QUEUE_TIMEOUT、RUN_TIMEOUT、RUN_CANCELLED、CIRCUIT_OPEN、DEPENDENCY_BUSY、UPSTREAM_RATE_LIMITED、UPSTREAM_UNAVAILABLE、RESULT_PERSIST_FAILED。错误详情不回显原始 provider body、密码、SQL 或完整输入。
+
+NDJSON start 增加 run_id，后续 status.phase 可为 queued/degraded。单客户端缓存默认 128 个事件；过慢时发 error/code=SLOW_CONSUMER 并结束推送，后台结果仍持久化，可刷新读取。此时不能推断任务被取消。
+
+默认执行 4 个任务，额外在途 32；每用户执行 1、额外在途 3。排队 60 秒、执行 180 秒截止，依赖连续失败 3 次熔断 30 秒。具体配置见 `.env.example`。数据库写入失败时可能保留运行锁；恢复数据库后，确认旧进程已停止，再重启单实例恢复中断状态。当前不保证崩溃后续跑或数据库故障期间结果不丢失。

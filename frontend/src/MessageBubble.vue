@@ -13,7 +13,7 @@ async function copy(){try{await navigator.clipboard.writeText(props.message.cont
     <div class="message-avatar">{{message.role==='user'?'你':'✳'}}</div>
     <div class="bubble-content">
       <div class="bubble-heading"><strong>{{message.role==='user'?'你':'Agent'}}</strong><span v-if="message.model&&message.role==='assistant'">{{message.model}}</span></div>
-      <div class="message-text"><template v-for="(block,i) in blocks" :key="i"><pre v-if="block.code" class="code-block"><code>{{block.text}}</code></pre><span v-else>{{block.text}}</span></template><span v-if="message.status==='pending'" class="stream-cursor"/></div>
+      <p v-if="message.result?.degraded" class="degraded-notice" role="status">服务已降级 · 以下为未核验来源摘要</p><div class="message-text"><template v-for="(block,i) in blocks" :key="i"><pre v-if="block.code" class="code-block"><code>{{block.text}}</code></pre><span v-else>{{block.text}}</span></template><span v-if="message.status==='pending'" class="stream-cursor"/></div>
       <div v-if="message.result?.sources.length" class="sources-grid"><a v-for="(source,i) in message.result.sources" :key="source.url" :href="safeURL(source.url)||undefined" target="_blank" rel="noopener noreferrer"><small>来源 {{i+1}} ↗</small><span>{{source.title}}</span></a></div>
       <div v-if="message.role==='assistant'&&message.status!=='pending'" class="message-actions"><button @click="copy">{{copied?'已复制':'复制回复'}}</button><button v-if="message.result" @click="emit('inspect')">执行详情 · {{message.result.rounds?.length||0}} 轮检索</button><span v-if="message.result">{{(message.result.latency_ms/1000).toFixed(1)}}s</span></div>
     </div>

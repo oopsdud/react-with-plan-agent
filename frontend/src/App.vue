@@ -4,12 +4,12 @@ import { AgentAPI, APIError, defaultBaseURL } from './api'
 import ModelSettings from './ModelSettings.vue'
 import MessageBubble from './MessageBubble.vue'
 import type { User, Conversation, StoredMessage, ChatResult, RuntimeInfo, ToolInfo } from './types'
-interface Thread { messages:StoredMessage[]; running:boolean; phase:string; model:string; result?:ChatResult; loaded:boolean }
+interface Thread { messages:StoredMessage[]; running:boolean; phase:string; model:string; result?:ChatResult; loaded:boolean; runId?:string; cancelBusy?:boolean; hasMore?:boolean; beforeId?:number; loadingMore?:boolean }
 const apiBase=ref(defaultBaseURL),user=ref<User>(),booting=ref(true),loginBusy=ref(false),username=ref('user1'),password=ref(''),error=ref('')
 const view=ref('chat'),sidebarOpen=ref(false),connectionOpen=ref(false),activeId=ref(''),conversations=ref<Conversation[]>([]),filter=ref('')
 const threads=reactive<Record<string,Thread>>({}),models=ref<string[]>([]),defaultModel=ref(''),runtime=ref<RuntimeInfo>(),tool=ref<ToolInfo>()
 const input=ref(''),messageBox=ref<HTMLElement>(),textarea=ref<HTMLTextAreaElement>(),atBottom=ref(true),loadingConversation=ref(false),catalogBusy=ref(false)
-const inspection=ref<ChatResult>(),toast=ref(''),controllers=new Set<AbortController>()
+const inspection=ref<ChatResult>(),toast=ref(''),controllers=new Map<string,AbortController>()
 let generation=0,tempId=-1,scrollFrame=0
 const thread=computed(()=>threads[activeId.value])
 const busy=computed(()=>thread.value?.running||false)
@@ -17,7 +17,7 @@ const filteredConversations=computed(()=>conversations.value.filter(c=>c.title.t
 const currentModel=computed({get:()=>thread.value?.model||defaultModel.value,set:value=>{if(thread.value)thread.value.model=value;else defaultModel.value=value}})
 const canSend=computed(()=>!!input.value.trim()&&models.value.includes(currentModel.value)&&!busy.value&&!loadingConversation.value)
 function api(){return new AgentAPI(apiBase.value.trim())}
-function showError(e:unknown){error.value=e instanceof Error?e.message:'操作失败';if(e instanceof APIError&&e.status===401)clearSession()}
+function showError(e:unknown){error.value=e instanceof Error?e.message:'操作失败';if(e instanceof APIError&&e.retryAfter)error.value+=`（建议 ${e.retryAfter} 秒后重试）`;if(e instanceof APIError&&e.requestId)error.value+=` · 请求 ${e.requestId.slice(0,8)}`;if(e instanceof APIError&&e.status===401)clearSession()}
 function clearSession(){generation++;controllers.forEach(c=>c.abort());controllers.clear();user.value=undefined;conversations.value=[];activeId.value='';Object.keys(threads).forEach(k=>delete threads[k]);models.value=[];defaultModel.value='';runtime.value=undefined;tool.value=undefined;input.value='';password.value='';inspection.value=undefined;view.value='chat'}
 async function refreshConversations(){const epoch=generation,result=await api().conversations();if(epoch===generation)conversations.value=result.conversations}
 async function catalog(){const epoch=generation;catalogBusy.value=true;try{const result=await api().catalog();if(epoch!==generation)return;models.value=result.models;defaultModel.value=result.default_model;if(thread.value&&!models.value.includes(thread.value.model))thread.value.model=models.value.includes(result.default_model)?result.default_model:models.value[0]||''}catch(e){if(epoch===generation)showError(e)}finally{if(epoch===generation)catalogBusy.value=false}}
@@ -40,11 +40,11 @@ async function openConversation(id:string){
   const epoch=generation;loadingConversation.value=false;activeId.value=id;view.value='chat';inspection.value=undefined;sidebarOpen.value=false;input.value='';error.value=''
   if(threads[id]?.loaded){loadingConversation.value=false;atBottom.value=true;await nextTick();scroll(true);return}
   loadingConversation.value=true
-  try{const detail=await api().conversation(id);if(epoch!==generation)return;threads[id]={messages:detail.messages,running:detail.running,phase:detail.running?'后台任务运行中，可稍后刷新查看':'',model:detail.model||defaultModel.value,loaded:true};if(activeId.value===id){await nextTick();atBottom.value=true;scroll(true)}}catch(e){if(epoch===generation)showError(e)}finally{if(epoch===generation&&activeId.value===id)loadingConversation.value=false}
+  try{const detail=await api().conversation(id);if(epoch!==generation)return;threads[id]={messages:detail.messages,hasMore:detail.has_more,beforeId:detail.next_before_id||undefined,running:detail.running,runId:detail.run_id||undefined,phase:detail.running?'后台任务运行中，可稍后刷新查看':'',model:detail.model||defaultModel.value,loaded:true};if(activeId.value===id){await nextTick();atBottom.value=true;scroll(true)}}catch(e){if(epoch===generation)showError(e)}finally{if(epoch===generation&&activeId.value===id)loadingConversation.value=false}
 }
 async function newConversation(){const epoch=generation;error.value='';try{const item=await api().createConversation();if(epoch!==generation)return;conversations.value.unshift(item);threads[item.id]={messages:[],running:false,phase:'',model:defaultModel.value,loaded:true};await openConversation(item.id);await nextTick();textarea.value?.focus()}catch(e){if(epoch===generation)showError(e)}}
 async function deleteConversation(item:Conversation){if(item.running||threads[item.id]?.running)return;if(!window.confirm(`删除会话「${item.title}」？`))return;try{await api().deleteConversation(item.id);delete threads[item.id];conversations.value=conversations.value.filter(c=>c.id!==item.id);if(activeId.value===item.id){activeId.value='';if(conversations.value[0])await openConversation(conversations.value[0].id)}}catch(e){showError(e)}}
-async function reloadConversation(){if(!activeId.value)return;const id=activeId.value;if(threads[id]?.running&&controllers.size)return;delete threads[id];await openConversation(id);await refreshConversations()}
+async function reloadConversation(){if(!activeId.value)return;const id=activeId.value;if(threads[id]?.running&&controllers.has(id))return;delete threads[id];await openConversation(id);await refreshConversations()}
 async function send(){
   if(!canSend.value)return
   const text=input.value.trim(),model=currentModel.value,epoch=generation
@@ -58,19 +58,32 @@ async function send(){
   const assistant=reactive<StoredMessage>({id:tempId--,role:'assistant',content:'',model,status:'pending',result:null,created_at:Date.now()/1000})
   state.messages.push(assistant)
   atBottom.value=true;await nextTick();scroll(true)
-  const controller=new AbortController();controllers.add(controller)
+  const controller=new AbortController();controllers.set(id,controller)
   let pending='',frame=0
   const flush=()=>{frame=0;if(epoch!==generation)return;if(pending){assistant.content+=pending;pending='';scroll()}}
   try{
     await api().stream(text,id,model,event=>{
       if(epoch!==generation)return
+      if(event.type==='start')state.runId=event.run_id
       if(event.type==='status')state.phase=event.message||''
       if(event.type==='delta'){pending+=event.content||'';if(!frame)frame=requestAnimationFrame(flush)}
       if(event.type==='review')state.phase=event.sufficient?'证据已充分，准备回答':`第 ${event.round} 轮证据不足，正在调整检索`
       if(event.type==='done'&&event.result){cancelAnimationFrame(frame);flush();assistant.content=event.result.answer||event.result.error||'';assistant.result=event.result;assistant.status=event.result.success?'completed':'failed';assistant.id=event.result.message_id||assistant.id;state.result=event.result;scroll()}
     },controller.signal)
-  }catch(e){if(epoch===generation){assistant.status='interrupted';assistant.content=assistant.content||'连接中断，任务可能仍在后台运行。点击刷新会话恢复结果。';showError(e)}}
-  finally{cancelAnimationFrame(frame);flush();controllers.delete(controller);if(epoch===generation){state.running=false;state.phase='';void refreshConversations().catch(showError);await nextTick();scroll()}}
+  }catch(e){if(epoch===generation){if(e instanceof APIError){state.messages=state.messages.filter(m=>m!==assistant&&!(m.role==='user'&&m.id===assistant.id+1));if(activeId.value===id&&!input.value)input.value=text;showError(e);return}assistant.status='interrupted';assistant.content=assistant.content||'连接中断，任务可能仍在后台运行。点击刷新会话恢复结果。';showError(e)}}
+  finally{cancelAnimationFrame(frame);flush();controllers.delete(id);if(epoch===generation){state.running=false;state.phase='';void refreshConversations().catch(showError);await nextTick();scroll()}}
+}
+async function loadOlder(){
+  const id=activeId.value,state=threads[id],epoch=generation
+  if(!state||state.loadingMore||!state.beforeId)return
+  state.loadingMore=true
+  const previousHeight=messageBox.value?.scrollHeight||0
+  try{const detail=await api().conversation(id,state.beforeId);if(epoch!==generation||threads[id]!==state)return;state.messages.unshift(...detail.messages);state.hasMore=detail.has_more;state.beforeId=detail.next_before_id||undefined;await nextTick();if(activeId.value===id&&messageBox.value)messageBox.value.scrollTop+=messageBox.value.scrollHeight-previousHeight}catch(e){if(epoch===generation)showError(e)}finally{state.loadingMore=false}
+}
+async function cancelCurrentRun(){
+  const state=thread.value;if(!state?.runId||state.cancelBusy)return
+  const epoch=generation;state.cancelBusy=true
+  try{await api().cancelRun(state.runId);if(epoch===generation)state.phase='已请求取消，正在保存任务状态'}catch(e){if(epoch===generation)showError(e)}finally{state.cancelBusy=false}
 }
 function keyboard(event:KeyboardEvent){if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();void send()}}
 function resizeInput(){if(textarea.value){textarea.value.style.height='auto';textarea.value.style.height=Math.min(textarea.value.scrollHeight,180)+'px'}}
@@ -91,8 +104,8 @@ function formatDate(value:number){return new Date(value*1000).toLocaleDateString
     <main class="workspace-main"><header class="topbar"><button class="mobile-toggle" aria-label="打开导航" @click="sidebarOpen=true">☰</button><div class="breadcrumb">工作空间 <span>/</span><strong>{{view==='chat'?(conversations.find(c=>c.id===activeId)?.title||'新对话'):view==='settings'?'模型配置':view==='tools'?'工具':'接口文档'}}</strong></div><div class="topbar-actions"><span class="connection-dot" :class="{connected:runtime}"/> <span class="connection-label">{{runtime?'已连接':'连接中'}}</span><button class="icon-button" title="刷新当前会话" @click="reloadConversation">↻</button></div></header>
       <div v-if="error" class="error-notice global-error" role="alert"><span>{{error}}</span><button @click="error=''">×</button></div>
       <section v-if="view==='chat'" class="chat-view"><header class="chat-toolbar"><div><span class="eyebrow">CONVERSATION</span><span class="privacy-label">仅当前账号可见</span></div><div class="model-picker"><span>◈</span><select v-model="currentModel" :disabled="busy||catalogBusy||!models.length" aria-label="当前对话模型"><option v-if="!models.length" value="">请先配置模型</option><option v-for="model in models" :key="model" :value="model">{{model}}</option></select><button title="刷新模型列表" :disabled="catalogBusy" @click="catalog">↻</button></div></header>
-        <div ref="messageBox" class="messages" @scroll.passive="trackScroll"><div v-if="loadingConversation" class="history-loading"><span class="loader"/>正在读取会话…</div><div v-else-if="!thread?.messages.length" class="welcome"><div class="welcome-mark">✳</div><h1>从一个问题开始。</h1><p>给 Agent 一个任务，观察它如何检索、核验和回答。</p><div class="suggestions"><button v-for="(text,i) in ['检索 ReAct 论文的公开资料','比较 ReAct 与计划执行的基本概念','查找 Vue 官方文档中的 TypeScript 说明']" :key="text" @click="input=text;textarea?.focus()"><span>{{['⌕','◇','↗'][i]}}</span>{{text}}<small>填入输入框 →</small></button></div><button v-if="!models.length" class="button primary" @click="view='settings'">连接模型服务</button></div><div v-else class="message-column"><MessageBubble v-for="message in thread.messages" :key="message.id" :message="message" @inspect="inspection=message.result||undefined"/><div v-if="thread.running" class="run-progress" role="status"><span class="thinking-dots"><i/><i/><i/></span>{{thread.phase}}</div></div></div>
-        <div class="composer-area"><button v-if="!atBottom" class="scroll-bottom" @click="atBottom=true;scroll(true)">↓ 回到最新消息</button><form class="composer" @submit.prevent="send"><textarea id="prompt" ref="textarea" v-model="input" maxlength="12000" rows="2" placeholder="输入任务或继续追问…" :disabled="busy" aria-label="任务输入" @keydown="keyboard" @input="resizeInput"/><div class="composer-bottom"><span class="composer-hint">↵ 发送 <span>· Shift + Enter 换行</span></span><button class="send-button" :disabled="!canSend" aria-label="发送消息">{{busy?'◌':'↑'}}</button></div></form><p class="composer-note">会话自动保存 · 证据不足时调整查询，最多检索 3 轮</p></div>
+        <div ref="messageBox" class="messages" @scroll.passive="trackScroll"><div v-if="loadingConversation" class="history-loading"><span class="loader"/>正在读取会话…</div><div v-else-if="!thread?.messages.length" class="welcome"><div class="welcome-mark">✳</div><h1>从一个问题开始。</h1><p>给 Agent 一个任务，观察它如何检索、核验和回答。</p><div class="suggestions"><button v-for="(text,i) in ['检索 ReAct 论文的公开资料','比较 ReAct 与计划执行的基本概念','查找 Vue 官方文档中的 TypeScript 说明']" :key="text" @click="input=text;textarea?.focus()"><span>{{['⌕','◇','↗'][i]}}</span>{{text}}<small>填入输入框 →</small></button></div><button v-if="!models.length" class="button primary" @click="view='settings'">连接模型服务</button></div><div v-else class="message-column"><button v-if="thread.hasMore" class="button history-more" :disabled="thread.loadingMore" @click="loadOlder">{{thread.loadingMore?'读取中…':'加载更早消息'}}</button><MessageBubble v-for="message in thread.messages" :key="message.id" :message="message" @inspect="inspection=message.result||undefined"/><div v-if="thread.running" class="run-progress" role="status"><span class="thinking-dots"><i/><i/><i/></span>{{thread.phase}}</div></div></div>
+        <div class="composer-area"><button v-if="!atBottom" class="scroll-bottom" @click="atBottom=true;scroll(true)">↓ 回到最新消息</button><form class="composer" @submit.prevent="send"><textarea id="prompt" ref="textarea" v-model="input" maxlength="12000" rows="2" placeholder="输入任务或继续追问…" :disabled="busy" aria-label="任务输入" @keydown="keyboard" @input="resizeInput"/><div class="composer-bottom"><span class="composer-hint">↵ 发送 <span>· Shift + Enter 换行</span></span><button v-if="busy" type="button" class="button cancel-run" :disabled="!thread?.runId||thread?.cancelBusy" @click="cancelCurrentRun">{{thread?.cancelBusy?'取消中…':'停止任务'}}</button><button v-else class="send-button" :disabled="!canSend" aria-label="发送消息">{{busy?'◌':'↑'}}</button></div></form><p class="composer-note">会话自动保存 · 证据不足时调整查询，最多检索 3 轮</p></div>
       </section>
       <section v-else class="page-content"><div class="page-heading"><span class="eyebrow">WORKSPACE SETTINGS</span><h1>{{view==='settings'?'模型与连接':view==='tools'?'工具':'接口文档'}}</h1><p>{{view==='settings'?'配置连接，在对话区自由选择可用模型。':'通用能力，清晰的调用边界。'}}</p></div><template v-if="view==='settings'"><ModelSettings v-if="user.is_admin" :base-u-r-l="apiBase" @saved="saved"/><div v-else class="card settings-card"><h2>当前模型服务</h2><p>服务由管理员 user1 配置。你可以在对话框选择该服务的可用模型。</p><p>当前可用 {{models.length}} 个模型。</p></div><div class="card settings-card"><h2>后端连接</h2><label>API 地址<input v-model="apiBase" placeholder="同源留空；开发模式 /api"></label><p>更换后端后请重新登录对应服务。</p><button class="button" @click="clearSession">应用连接并重新登录</button></div></template><div v-else-if="view==='tools'" class="card settings-card"><span class="tool-symbol">⌕</span><h2>web_search</h2><p>{{tool?.description}}</p><div class="tool-facts"><span>{{runtime?.search_provider||'ddgs'}} · 无需搜索 Key</span><span>最多 3 轮证据核验</span><span>超时 {{tool?.timeout_seconds}}s</span></div><details><summary>输入 Schema</summary><pre>{{JSON.stringify(tool?.input_schema,null,2)}}</pre></details></div><div v-else class="card settings-card"><h2>接口文档</h2><p>登录和会话持久化、按用户隔离的历史、模型选择与增量响应。</p><a :href="apiBase.replace(/\/$/,'')+'/docs'" target="_blank" rel="noopener">打开 Swagger UI ↗</a><pre>POST /auth/login
 GET /auth/me

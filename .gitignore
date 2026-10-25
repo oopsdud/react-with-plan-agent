@@ -40,3 +40,6 @@ Thumbs.db
 node_modules/
 
 .npm-cache/
+
+# Local architecture proposal; intentionally excluded from publication.
+/docs/concurrency.md

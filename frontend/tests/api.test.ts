@@ -38,3 +38,36 @@ describe('authenticated chat', () => {
     expect(wrapper.find('#username').exists()).toBe(true);expect(wrapper.find('#prompt').exists()).toBe(false);expect(wrapper.get('.register-note button').attributes('disabled')).toBeDefined();wrapper.unmount()
   })
 })
+
+describe('queue and cancellation UI',()=>{
+  function environment(reject=false){
+    let stream:ReadableStreamDefaultController<Uint8Array>|undefined
+    const result={success:false,answer:'任务已取消',error:'任务已取消',sources:[],rounds:[],steps:[],latency_ms:2,trace_id:'run',message_id:2,run_id:'run-1'}
+    const fetcher=vi.fn(async(url:string,options:RequestInit)=>{
+      const value=url.endsWith('/auth/me')?{id:'user-1',username:'user1',is_admin:true}:url.endsWith('/models')?{models:['model-a'],default_model:'model-a'}:url.endsWith('/runtime')?{llm_configured:true}:url.endsWith('/tools/web_search')?{name:'web_search',input_schema:{}}:url.endsWith('/conversations')?(options.method==='POST'?{id:'cid',title:'new',model:'model-a',updated_at:1,running:false}:{conversations:[]}):{}
+      if(url.endsWith('/chat/stream')){
+        if(reject)return {ok:false,status:429,json:async()=>({detail:'队列已满',error:{code:'QUEUE_FULL',retry_after:5},request_id:'request-123'})}
+        return {ok:true,body:new ReadableStream<Uint8Array>({start(c){stream=c;c.enqueue(new TextEncoder().encode('{"type":"start","run_id":"run-1"}\n{"type":"status","phase":"queued","message":"任务已受理，等待执行配额"}\n'))}})}
+      }
+      if(url.endsWith('/runs/run-1/cancel')){stream?.enqueue(new TextEncoder().encode(JSON.stringify({type:'done',result})+'\n'));stream?.close()}
+      return {ok:true,json:async()=>value}
+    })
+    vi.stubGlobal('fetch',fetcher)
+    return fetcher
+  }
+  it('shows queued state and cancels the actual server run',async()=>{
+    const fetcher=environment(),wrapper=mount(App);await flushPromises()
+    await wrapper.get('#prompt').setValue('queued task');await wrapper.get('form.composer').trigger('submit');await flushPromises()
+    expect(wrapper.text()).toContain('等待执行配额');expect(wrapper.get('.cancel-run').attributes('disabled')).toBeUndefined()
+    await wrapper.get('.cancel-run').trigger('click');await flushPromises()
+    expect(fetcher.mock.calls.some(([url])=>url.endsWith('/runs/run-1/cancel'))).toBe(true)
+    expect(wrapper.text()).toContain('任务已取消');expect(wrapper.find('.cancel-run').exists()).toBe(false);wrapper.unmount()
+  })
+  it('rolls back unsaved optimistic messages and keeps input when admission rejects',async()=>{
+    environment(true);const wrapper=mount(App);await flushPromises()
+    await wrapper.get('#prompt').setValue('keep this input');await wrapper.get('form.composer').trigger('submit');await flushPromises()
+    expect(wrapper.findAll('.chat-message')).toHaveLength(0)
+    expect((wrapper.get('#prompt').element as HTMLTextAreaElement).value).toBe('keep this input')
+    expect(wrapper.text()).toContain('队列已满');expect(wrapper.text()).toContain('5 秒后重试');wrapper.unmount()
+  })
+})

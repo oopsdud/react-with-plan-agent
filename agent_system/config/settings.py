@@ -26,6 +26,28 @@ class Settings(BaseSettings):
     SESSION_TTL_SECONDS: int = Field(default=604800, ge=60)
     COOKIE_SECURE: bool = False
 
+    # Single-process bounded scheduler. Use a shared broker before adding API workers.
+    AUTH_LOGIN_PER_IP_PER_MINUTE: int = Field(default=60, ge=1, le=10000)
+    AUTH_LOGIN_PER_ACCOUNT_PER_MINUTE: int = Field(default=10, ge=1, le=10000)
+    HTTP_MAX_CONCURRENT: int = Field(default=128, ge=8, le=10000)
+    AGENT_MAX_CONCURRENT: int = Field(default=4, ge=1, le=128)
+    AGENT_MAX_QUEUED: int = Field(default=32, ge=0, le=10000)
+    USER_MAX_CONCURRENT: int = Field(default=1, ge=1, le=32)
+    USER_MAX_QUEUED: int = Field(default=3, ge=0, le=100)
+    USER_REQUESTS_PER_MINUTE: int = Field(default=20, ge=1, le=10000)
+    AGENT_QUEUE_TIMEOUT_SECONDS: float = Field(default=60, gt=0, le=3600)
+    AGENT_RUN_TIMEOUT_SECONDS: float = Field(default=180, gt=0, le=3600)
+    AGENT_SHUTDOWN_GRACE_SECONDS: float = Field(default=15, ge=0, le=120)
+    LLM_MAX_CONCURRENT: int = Field(default=4, ge=1, le=128)
+    SEARCH_MAX_CONCURRENT: int = Field(default=4, ge=1, le=128)
+    DEPENDENCY_SLOT_TIMEOUT_SECONDS: float = Field(default=2, gt=0, le=60)
+    CIRCUIT_FAILURE_THRESHOLD: int = Field(default=3, ge=1, le=100)
+    CIRCUIT_OPEN_SECONDS: float = Field(default=30, gt=0, le=600)
+    CONTEXT_MAX_CHARS: int = Field(default=48000, ge=2000, le=500000)
+    LLM_MAX_RESPONSE_CHARS: int = Field(default=60000, ge=1000, le=500000)
+    STREAM_BUFFER_EVENTS: int = Field(default=128, ge=4, le=4096)
+    MODEL_CATALOG_STALE_SECONDS: int = Field(default=600, ge=60, le=3600)
+
     # 数据库 - 本地开发默认SQLite
     DATABASE_URL: str = "sqlite:///./data/agent.db"
     

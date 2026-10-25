@@ -57,7 +57,7 @@ DDGS requires no dedicated search API key. Search engines may still rate-limit o
 
 Messages, conversations, selected models, sources, and execution details persist in SQLite. Refreshing, signing in again, or starting a new conversation preserves previous conversations. Search, switch, and delete history in the sidebar.
 
-The backend derives identity from the authenticated session, checks conversation ownership, and loads the last 50 completed messages from that conversation. Client-supplied user IDs and history are rejected. Failed/interrupted turns are excluded from future context. There is no memory sharing between users or conversations; legacy episodic memory is excluded from chat.
+The backend derives identity from the authenticated session, checks conversation ownership, and loads the last 50 completed messages, bounded to 48,000 characters, from that conversation. Client-supplied user IDs and history are rejected. Failed/interrupted turns are excluded from future context. There is no memory sharing between users or conversations; legacy episodic memory is excluded from chat.
 
 The search flow is: intent → search → evidence sufficiency review → refined search when needed → grounded answer. A successful tool call does not imply adequate evidence. Reviews consider the original question, current context, accumulated sources, and tool results. Search ends early when sufficient, after at most **3 tool calls including failures**, or when no new query is provided. There are no extra hidden search retries. Insufficient evidence produces an explicit limitation; no evidence produces no fabricated answer. If every search attempt fails, the task is marked failed. General conversation uses the model without forcing search. Model evidence judgments can still be wrong, and snippets are not full-page retrieval.
 
@@ -88,4 +88,14 @@ Use `.venv\Scripts\python.exe` if applicable. After building, FastAPI serves `/c
 | [API](docs/api.md), [OpenAPI](docs/openapi.json) | Backend contracts |
 | [Frontend](docs/frontend.md), [Architecture](docs/architecture.md) | UI behavior and runtime boundaries |
 
-This is a single-process local development framework; use one Uvicorn worker because startup recovers interrupted runs. Open registration, password management UI, rate limits, task queues, task cancellation, and production observability are not implemented. It is not a production internet service. Embeddings, Chroma, and Redis are unnecessary for the default flow. The executor is custom Python rather than LangGraph.
+This is a single-process local development framework; use one Uvicorn worker because startup recovers interrupted runs. Open registration, password management UI, distributed task queues, departmental SSO/RBAC, and production observability are not implemented. It is not a production internet service. Embeddings, Chroma, and Redis are unnecessary for the default flow. The executor is custom Python rather than LangGraph.
+
+## Concurrency controls (0.4)
+
+The runtime now limits global execution (4 by default) plus an extra 32 in-flight submissions, and per-user execution (1) plus 3 extra submissions. Users are scheduled round-robin. Queue and execution deadlines, cancellation, owner-scoped task status, request deduplication, upstream bulkheads, circuit breakers, bounded streaming buffers, login throttling, and explicit unverified-source degradation are implemented. Defaults and resource bounds are in `.env.example`.
+
+Use `GET /runs/{id}`, `POST /runs/{id}/cancel`, admin-only `GET /operations`, and `GET /ready`. Optional `client_request_id` prevents duplicate execution within a user; duplicates return 409 with the original run ID. Messages load through bounded cursor pagination. Upgrade by stopping old instances, backing up `data`, and restarting one worker; new lifecycle tables are added automatically. A local process lease rejects a second API process sharing that runtime directory.
+
+This remains **single process**, with bounded in-memory scheduling rather than a distributed durable queue. Restart marks unfinished tasks interrupted; it does not resume execution. Database persistence failure is reported rather than hidden. Capacity settings must be tuned against actual provider quotas and measured task duration; concurrency limits are not throughput guarantees.
+
+If persistence fails, the API reports an error and the database run lock may remain. Restore database availability, ensure the old process has stopped, then restart one instance to mark unfinished runs interrupted and release conversations. Execution does not automatically resume after a crash, and results cannot be guaranteed during a database outage. HTTP failures expose stable error codes, request IDs, and Retry-After when applicable; see the [API contract](docs/api.md).

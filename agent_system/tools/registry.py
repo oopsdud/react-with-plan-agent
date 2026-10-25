@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from agent_system.config.settings import get_settings
 from agent_system.tools.web_search import search_web
+from agent_system.runtime import get_runtime
+from agent_system.runtime.errors import ServiceError
 
 
 class ToolResult(BaseModel):
@@ -59,7 +61,10 @@ class WebSearchTool(BaseTool):
                    max_results: Annotated[int, Field(ge=1, le=10)] = 5) -> Dict[str, Any]:
         if not query.strip():
             raise ValueError('query must not be blank')
-        return await search_web(query,max_results,get_settings(),self.transport)
+        settings=get_settings()
+        identity=settings.SEARCH_PROVIDER+':'+(settings.SEARXNG_BASE_URL or settings.DDGS_BACKEND)
+        async with get_runtime().guards.get('search',identity).call():
+            return await search_web(query,max_results,settings,self.transport)
 
 
 

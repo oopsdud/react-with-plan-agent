@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field, SecretStr
 from agent_system.db.session import get_db
 from agent_system.db.models import User, LoginSession
 from agent_system.config.settings import get_settings
+from agent_system.runtime.login_limit import LoginLimiter
+
+login_limiter=LoginLimiter()
 
 COOKIE='agent_session'
 router=APIRouter(prefix='/auth',tags=['Authentication'])
@@ -50,6 +53,8 @@ class LoginRequest(BaseModel):
 
 @router.post('/login')
 def login(body:LoginRequest,response:Response,request:Request,db=Depends(get_db)):
+    settings=get_settings()
+    login_limiter.check(request.client.host if request.client else 'unknown',body.username,settings.AUTH_LOGIN_PER_IP_PER_MINUTE,settings.AUTH_LOGIN_PER_ACCOUNT_PER_MINUTE)
     user=db.query(User).filter_by(username=body.username.strip()).first()
     # Perform a KDF for unknown users too, without exposing account existence.
     encoded=user.password_hash if user else '00'*16+':'+'00'*32

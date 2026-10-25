@@ -1229,3 +1229,6 @@ summary {
 }
 
 }
+
+.cancel-run { padding:7px 12px; font-size:11px; color:#98724b; }
+.degraded-notice { color:#9b773f; background:#faf3e7; padding:9px 12px; border-radius:8px; font-size:11px; }

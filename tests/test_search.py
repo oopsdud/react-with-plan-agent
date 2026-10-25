@@ -13,6 +13,15 @@ from agent_system.tools.web_search import normalize_results,search_configured
 from agent_system.utils.llm_client import OpenAIClient,LLMError
 
 class SearchTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from agent_system.runtime import get_runtime
+        from agent_system.runtime.resilience import GuardRegistry
+        # Adapter errors are tested independently; circuit transitions have separate tests.
+        get_runtime().guards=GuardRegistry(Settings(_env_file=None,CIRCUIT_FAILURE_THRESHOLD=100))
+    async def asyncTearDown(self):
+        from agent_system.runtime import get_runtime
+        get_runtime().search_threads.close()
+
     def settings(self,**kwargs):return Settings(_env_file=None,**kwargs)
     async def test_ddgs_needs_no_key_and_preserves_shared_contract(self):
         factory=MagicMock()

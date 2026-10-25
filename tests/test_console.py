@@ -20,6 +20,8 @@ RESULT={'trace_id':'test','success':True,'answer':'answer','intent':None,'steps'
 
 class ConsoleTests(unittest.TestCase):
     def setUp(self):
+        from agent_system.runtime.login_limit import LoginLimiter
+        self.login_limit=patch('agent_system.api.auth.login_limiter',LoginLimiter());self.login_limit.start()
         self.directory=tempfile.TemporaryDirectory()
         self.engine=create_engine('sqlite:///'+(Path(self.directory.name)/'test.db').as_posix(),connect_args={'check_same_thread':False})
         Base.metadata.create_all(self.engine)
@@ -32,6 +34,7 @@ class ConsoleTests(unittest.TestCase):
         self.client=TestClient(app)
         self.login()
     def tearDown(self):
+        self.login_limit.stop()
         self.client.close();self.catalog.stop();self.config.stop();self.patch.stop();self.engine.dispose();self.directory.cleanup()
     def login(self,n=1,client=None):
         response=(client or self.client).post('/auth/login',json={'username':f'user{n}','password':f'AgentUser{n}!'})
@@ -118,7 +121,7 @@ class ConsoleTests(unittest.TestCase):
         with patch('agent_system.api.routes.run_agent',side_effect=fake):
             response=self.client.post('/chat/stream',json={'user_input':'stream','model':'model-b'})
         events=[json.loads(line) for line in response.text.splitlines()]
-        self.assertEqual([e['type'] for e in events],['start','status','delta','delta','done'])
+        self.assertEqual([e['type'] for e in events],['start','status','status','delta','delta','done'])
         self.assertEqual(''.join(e['content'] for e in events if e['type']=='delta'),'answer')
         cid=events[0]['conversation_id']
         self.assertEqual(self.client.get('/conversations/'+cid).json()['messages'][1]['content'],'answer')

@@ -1,5 +1,8 @@
 """Model discovery and local configuration endpoints."""
+import asyncio
 import httpx
+from agent_system.runtime import get_runtime
+from agent_system.runtime.errors import ServiceError
 from fastapi import APIRouter, HTTPException, Response, Depends
 from pydantic import BaseModel, Field, SecretStr, field_validator
 from typing import Optional
@@ -47,7 +50,7 @@ def resolve_key(request):
         raise HTTPException(422,'请输入 API Key；更换服务地址时需要重新输入密钥。')
     return key
 
-async def discover_models(base_url,key):
+async def _discover_models(base_url,key):
     try:
         async with httpx.AsyncClient(timeout=20,follow_redirects=False) as client:
             result=await client.get(base_url+'/models',headers={'Authorization':'Bearer '+key})
@@ -58,11 +61,20 @@ async def discover_models(base_url,key):
         if not models:raise HTTPException(422,'服务没有返回可用模型，请检查 API 地址及账号权限。')
         return models
     except httpx.HTTPStatusError as error:
-        raise HTTPException(502,f'读取模型失败（HTTP {error.response.status_code}），请检查 API 地址、密钥及服务是否支持 GET /models。') from None
+        temporary=error.response.status_code==429 or error.response.status_code>=500
+        raise ServiceError('MODEL_DISCOVERY_REJECTED',f'读取模型失败（HTTP {error.response.status_code}），请检查 API 地址、密钥及服务是否支持 GET /models。',502,temporary,5 if temporary else None) from None
     except httpx.RequestError:
         raise HTTPException(502,'读取模型连接失败或超时，请检查 API 地址及网络。') from None
     except ValueError:
         raise HTTPException(502,'服务返回了无效的模型列表，需要 OpenAI 兼容的 GET /models 接口。') from None
+
+async def discover_models(base_url,key):
+    async with get_runtime().guards.get('catalog',base_url+'|'+key).call():
+        try:return await _discover_models(base_url,key)
+        except HTTPException as error:
+            if error.status_code==502:
+                raise ServiceError('MODEL_DISCOVERY_FAILED',error.detail,502,True,5) from None
+            raise
 
 @router.get('',response_model=ModelConfigView)
 async def read_config(response:Response):
@@ -84,7 +96,7 @@ async def update_config(request:ModelSave,response:Response):
     except OSError:
         raise HTTPException(500,'模型配置保存失败，请检查配置目录的写入权限。') from None
     get_settings.cache_clear()
-    _catalog_cache.clear()
+    get_runtime().catalog.clear()
     response.headers['Cache-Control']='no-store'
     return public_config()
 
@@ -92,14 +104,23 @@ async def update_config(request:ModelSave,response:Response):
 # A short-lived cache avoids a provider request for every turn/model menu opening.
 import hashlib
 import time
-_catalog_cache={}
-async def available_models():
-    settings=get_settings()
+async def available_models(settings_snapshot=None):
+    settings=settings_snapshot or get_settings()
     if not credential_configured(settings.LLM_API_KEY):return []
     key=(settings.LLM_BASE_URL or 'https://api.openai.com/v1',hashlib.sha256(settings.LLM_API_KEY.encode()).hexdigest())
-    cached=_catalog_cache.get(key)
-    if cached and cached[0]>time.monotonic():return cached[1]
-    values=await discover_models(key[0].rstrip('/'),settings.LLM_API_KEY)
-    _catalog_cache.clear()
-    _catalog_cache[key]=(time.monotonic()+60,values)
-    return values
+    runtime=get_runtime()
+    cached=runtime.catalog.get(key)
+    if cached and time.monotonic()-cached[0]<60:return cached[1]
+    # Coalesce cache misses: a queue burst must not make N provider discovery calls.
+    async with runtime.catalog_lock:
+        cached=runtime.catalog.get(key)
+        if cached and time.monotonic()-cached[0]<60:return cached[1]
+        try:values=await discover_models(key[0].rstrip('/'),settings.LLM_API_KEY)
+        except (HTTPException,ServiceError):
+            if cached and time.monotonic()-cached[0]<settings.MODEL_CATALOG_STALE_SECONDS:
+                # Explicitly bounded stale catalog; never share a key across credentials.
+                return cached[1]
+            raise
+        runtime.catalog.clear()
+        runtime.catalog[key]=(time.monotonic(),values)
+        return values

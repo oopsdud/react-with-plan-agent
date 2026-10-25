@@ -9,7 +9,7 @@ export interface StepResult {
 }
 export interface Source { title: string; url: string; content: string; score: number | null }
 export interface ChatResult {
-  conversation_id?:string; message_id?:number; model?:string; rounds?:ResearchRound[]; evidence_sufficient?:boolean|null; trace_id: string; success: boolean; answer: string | null; intent: Intent | null
+  run_id?:string; run_state?:string; degraded?:boolean; queue_wait_ms?:number; error_info?:{code:string;message:string;retryable:boolean}; conversation_id?:string; message_id?:number; model?:string; rounds?:ResearchRound[]; evidence_sufficient?:boolean|null; trace_id: string; success: boolean; answer: string | null; intent: Intent | null
   steps: StepResult[]; latency_ms: number; error: string | null; sources: Source[]
 }
 export interface RuntimeInfo {
@@ -26,11 +26,11 @@ export interface ModelConnection { base_url: string; api_key?: string }
 export interface ModelSave extends ModelConnection { model: string; json_mode: boolean }
 
 export interface User { id:string; username:string; is_admin:boolean }
-export interface Conversation { id:string; title:string; model:string|null; updated_at:number; running:boolean }
+export interface Conversation { id:string; title:string; model:string|null; updated_at:number; running:boolean; run_id?:string|null }
 export interface StoredMessage { id:number; role:'user'|'assistant'; content:string; model:string|null; status:string; result:ChatResult|null; created_at:number }
-export interface ConversationDetail extends Conversation { messages:StoredMessage[] }
+export interface ConversationDetail extends Conversation { messages:StoredMessage[]; has_more?:boolean; next_before_id?:number|null }
 export interface ResearchRound { round:number; query:string; sufficient:boolean; reason:string; next_query:string }
 export interface StreamEvent {
-  type:string; content?:string; message?:string; phase?:string; round?:number; query?:string; sufficient?:boolean; reason?:string
+  run_id?:string; code?:string; type:string; content?:string; message?:string; phase?:string; round?:number; query?:string; sufficient?:boolean; reason?:string
   conversation_id?:string; message_id?:number; result?:ChatResult; step?:StepResult; intent?:Intent
 }

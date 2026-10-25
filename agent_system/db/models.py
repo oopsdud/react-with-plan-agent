@@ -143,3 +143,26 @@ class ConversationMessage(Base):
     status = Column(String(20), nullable=False, default='completed')
     result = Column(JSON, nullable=True)
     created_at = Column(Float, nullable=False)
+
+
+class AgentRun(Base):
+    """Durable lifecycle metadata; request payload/history stays in owner-scoped messages."""
+    __tablename__ = 'agent_runs'
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), ForeignKey('users.id'), nullable=False, index=True)
+    conversation_id = Column(String(64), ForeignKey('conversations.id'), nullable=False, index=True)
+    message_id = Column(Integer, ForeignKey('conversation_messages.id'), nullable=False)
+    state = Column(String(20), nullable=False, default='queued', index=True)
+    created_at = Column(Float, nullable=False)
+    started_at = Column(Float, nullable=True)
+    finished_at = Column(Float, nullable=True)
+    error_code = Column(String(64), nullable=True)
+
+
+class RequestDedup(Base):
+    __tablename__ = 'request_dedup'
+    user_id = Column(String(64), ForeignKey('users.id'), primary_key=True)
+    request_id = Column(String(128), primary_key=True)
+    fingerprint = Column(String(64), nullable=False)
+    run_id = Column(String(64), ForeignKey('agent_runs.id'), nullable=False, index=True)
+    expires_at = Column(Float, nullable=False, index=True)
