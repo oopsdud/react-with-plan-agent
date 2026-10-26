@@ -3,14 +3,16 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { AgentAPI, APIError, defaultBaseURL } from './api'
 import ModelSettings from './ModelSettings.vue'
 import MessageBubble from './MessageBubble.vue'
-import type { User, Conversation, StoredMessage, ChatResult, RuntimeInfo, ToolInfo } from './types'
+import type { User, Conversation, StoredMessage, ChatResult, RuntimeInfo, ToolInfo, CheckpointView } from './types'
 interface Thread { messages:StoredMessage[]; running:boolean; phase:string; model:string; result?:ChatResult; loaded:boolean; runId?:string; cancelBusy?:boolean; hasMore?:boolean; beforeId?:number; loadingMore?:boolean }
 const apiBase=ref(defaultBaseURL),user=ref<User>(),booting=ref(true),loginBusy=ref(false),username=ref('user1'),password=ref(''),error=ref('')
 const view=ref('chat'),sidebarOpen=ref(false),connectionOpen=ref(false),activeId=ref(''),conversations=ref<Conversation[]>([]),filter=ref('')
 const threads=reactive<Record<string,Thread>>({}),models=ref<string[]>([]),defaultModel=ref(''),runtime=ref<RuntimeInfo>(),tool=ref<ToolInfo>()
 const input=ref(''),messageBox=ref<HTMLElement>(),textarea=ref<HTMLTextAreaElement>(),atBottom=ref(true),loadingConversation=ref(false),catalogBusy=ref(false)
+const checkpointData=ref<CheckpointView>(),checkpointBusy=ref(false),graphDraft=ref(''),revisionReason=ref('')
 const inspection=ref<ChatResult>(),toast=ref(''),controllers=new Map<string,AbortController>()
-let generation=0,tempId=-1,scrollFrame=0
+let generation=0,tempId=-1,scrollFrame=0,polling=false
+const recoveryPoll=setInterval(()=>{void pollRecovery()},2000)
 const thread=computed(()=>threads[activeId.value])
 const busy=computed(()=>thread.value?.running||false)
 const filteredConversations=computed(()=>conversations.value.filter(c=>c.title.toLowerCase().includes(filter.value.toLowerCase())))
@@ -18,7 +20,7 @@ const currentModel=computed({get:()=>thread.value?.model||defaultModel.value,set
 const canSend=computed(()=>!!input.value.trim()&&models.value.includes(currentModel.value)&&!busy.value&&!loadingConversation.value)
 function api(){return new AgentAPI(apiBase.value.trim())}
 function showError(e:unknown){error.value=e instanceof Error?e.message:'操作失败';if(e instanceof APIError&&e.retryAfter)error.value+=`（建议 ${e.retryAfter} 秒后重试）`;if(e instanceof APIError&&e.requestId)error.value+=` · 请求 ${e.requestId.slice(0,8)}`;if(e instanceof APIError&&e.status===401)clearSession()}
-function clearSession(){generation++;controllers.forEach(c=>c.abort());controllers.clear();user.value=undefined;conversations.value=[];activeId.value='';Object.keys(threads).forEach(k=>delete threads[k]);models.value=[];defaultModel.value='';runtime.value=undefined;tool.value=undefined;input.value='';password.value='';inspection.value=undefined;view.value='chat'}
+function clearSession(){generation++;controllers.forEach(c=>c.abort());controllers.clear();user.value=undefined;conversations.value=[];activeId.value='';Object.keys(threads).forEach(k=>delete threads[k]);models.value=[];defaultModel.value='';runtime.value=undefined;tool.value=undefined;input.value='';password.value='';inspection.value=undefined;checkpointData.value=undefined;view.value='chat'}
 async function refreshConversations(){const epoch=generation,result=await api().conversations();if(epoch===generation)conversations.value=result.conversations}
 async function catalog(){const epoch=generation;catalogBusy.value=true;try{const result=await api().catalog();if(epoch!==generation)return;models.value=result.models;defaultModel.value=result.default_model;if(thread.value&&!models.value.includes(thread.value.model))thread.value.model=models.value.includes(result.default_model)?result.default_model:models.value[0]||''}catch(e){if(epoch===generation)showError(e)}finally{if(epoch===generation)catalogBusy.value=false}}
 async function initialize(){
@@ -32,7 +34,7 @@ async function initialize(){
 async function login(){if(loginBusy.value)return;loginBusy.value=true;error.value='';try{user.value=await api().login(username.value.trim(),password.value);password.value='';await initialize()}catch(e){showError(e)}finally{loginBusy.value=false}}
 async function logout(){try{await api().logout();clearSession();error.value=''}catch(e){showError(e)}}
 onMounted(async()=>{try{user.value=await api().me();await initialize()}catch(e){if(!(e instanceof APIError&&e.status===401))showError(e)}finally{booting.value=false}})
-onUnmounted(()=>{controllers.forEach(c=>c.abort());cancelAnimationFrame(scrollFrame)})
+onUnmounted(()=>{clearInterval(recoveryPoll);controllers.forEach(c=>c.abort());cancelAnimationFrame(scrollFrame)})
 function scroll(force=false){if(scrollFrame)return;scrollFrame=requestAnimationFrame(()=>{scrollFrame=0;if(messageBox.value&&(force||atBottom.value))messageBox.value.scrollTop=messageBox.value.scrollHeight})}
 function trackScroll(){const box=messageBox.value;if(box)atBottom.value=box.scrollHeight-box.scrollTop-box.clientHeight<100}
 async function openConversation(id:string){
@@ -64,7 +66,7 @@ async function send(){
   try{
     await api().stream(text,id,model,event=>{
       if(epoch!==generation)return
-      if(event.type==='start')state.runId=event.run_id
+      if(event.type==='start'){state.runId=event.run_id;assistant.run_id=event.run_id;assistant.checkpoint_available=true}
       if(event.type==='status')state.phase=event.message||''
       if(event.type==='delta'){pending+=event.content||'';if(!frame)frame=requestAnimationFrame(flush)}
       if(event.type==='review')state.phase=event.sufficient?'证据已充分，准备回答':`第 ${event.round} 轮证据不足，正在调整检索`
@@ -79,6 +81,35 @@ async function loadOlder(){
   state.loadingMore=true
   const previousHeight=messageBox.value?.scrollHeight||0
   try{const detail=await api().conversation(id,state.beforeId);if(epoch!==generation||threads[id]!==state)return;state.messages.unshift(...detail.messages);state.hasMore=detail.has_more;state.beforeId=detail.next_before_id||undefined;await nextTick();if(activeId.value===id&&messageBox.value)messageBox.value.scrollTop+=messageBox.value.scrollHeight-previousHeight}catch(e){if(epoch===generation)showError(e)}finally{state.loadingMore=false}
+}
+async function inspectMessage(message:StoredMessage,withCheckpoint=false){
+  checkpointData.value=undefined
+  const runId=message.run_id||message.result?.run_id
+  inspection.value=message.result||{success:false,answer:message.content,error:null,trace_id:runId||'',intent:null,steps:[],sources:[],latency_ms:0,run_id:runId}
+  if(!withCheckpoint||!runId)return
+  const epoch=generation;checkpointBusy.value=true
+  try{const data=await api().checkpoint(runId);if(epoch!==generation)return;checkpointData.value=data;graphDraft.value=JSON.stringify(data.plan,null,2);revisionReason.value=''}catch(e){if(epoch===generation)showError(e)}finally{checkpointBusy.value=false}
+}
+async function resumeMessage(message:StoredMessage){
+  const id=activeId.value,epoch=generation,runId=message.run_id||message.result?.run_id
+  if(!runId||busy.value)return
+  checkpointBusy.value=true
+  try{const data=await api().checkpoint(runId);await api().resumeRun(runId,data.generation);if(epoch!==generation)return;inspection.value=undefined;await reloadConversation();toast.value='已提交恢复，将复用有效的成功步骤';setTimeout(()=>toast.value='',2500)}catch(e){if(epoch===generation)showError(e)}finally{checkpointBusy.value=false}
+}
+async function saveGraph(){
+  const data=checkpointData.value;if(!data)return
+  const epoch=generation;checkpointBusy.value=true
+  try{const plan=JSON.parse(graphDraft.value) as Record<string,unknown>;await api().revisePlan(data.run_id,data.plan_version,plan,revisionReason.value.trim());const current=await api().checkpoint(data.run_id);if(epoch!==generation)return;checkpointData.value=current;graphDraft.value=JSON.stringify(current.plan,null,2);toast.value='新计划版本已保存，恢复时重做受影响步骤';setTimeout(()=>toast.value='',2500)}catch(e){if(epoch===generation)showError(e)}finally{checkpointBusy.value=false}
+}
+async function resumeInspected(){
+  const data=checkpointData.value;if(!data)return
+  await resumeMessage({run_id:data.run_id} as StoredMessage)
+}
+async function pollRecovery(){
+  const id=activeId.value,state=threads[id],epoch=generation
+  if(polling||!user.value||view.value!=='chat'||!state?.running||!state.runId||controllers.has(id))return
+  polling=true
+  try{const run=await api().run(state.runId);if(epoch!==generation||activeId.value!==id)return;if(!['queued','running'].includes(run.state)){delete threads[id];await openConversation(id);await refreshConversations()}else state.phase=run.state==='queued'?'恢复任务正在排队':'正在从检查点继续执行'}catch(e){if(epoch===generation)showError(e)}finally{polling=false}
 }
 async function cancelCurrentRun(){
   const state=thread.value;if(!state?.runId||state.cancelBusy)return
@@ -104,7 +135,7 @@ function formatDate(value:number){return new Date(value*1000).toLocaleDateString
     <main class="workspace-main"><header class="topbar"><button class="mobile-toggle" aria-label="打开导航" @click="sidebarOpen=true">☰</button><div class="breadcrumb">工作空间 <span>/</span><strong>{{view==='chat'?(conversations.find(c=>c.id===activeId)?.title||'新对话'):view==='settings'?'模型配置':view==='tools'?'工具':'接口文档'}}</strong></div><div class="topbar-actions"><span class="connection-dot" :class="{connected:runtime}"/> <span class="connection-label">{{runtime?'已连接':'连接中'}}</span><button class="icon-button" title="刷新当前会话" @click="reloadConversation">↻</button></div></header>
       <div v-if="error" class="error-notice global-error" role="alert"><span>{{error}}</span><button @click="error=''">×</button></div>
       <section v-if="view==='chat'" class="chat-view"><header class="chat-toolbar"><div><span class="eyebrow">CONVERSATION</span><span class="privacy-label">仅当前账号可见</span></div><div class="model-picker"><span>◈</span><select v-model="currentModel" :disabled="busy||catalogBusy||!models.length" aria-label="当前对话模型"><option v-if="!models.length" value="">请先配置模型</option><option v-for="model in models" :key="model" :value="model">{{model}}</option></select><button title="刷新模型列表" :disabled="catalogBusy" @click="catalog">↻</button></div></header>
-        <div ref="messageBox" class="messages" @scroll.passive="trackScroll"><div v-if="loadingConversation" class="history-loading"><span class="loader"/>正在读取会话…</div><div v-else-if="!thread?.messages.length" class="welcome"><div class="welcome-mark">✳</div><h1>从一个问题开始。</h1><p>给 Agent 一个任务，观察它如何检索、核验和回答。</p><div class="suggestions"><button v-for="(text,i) in ['检索 ReAct 论文的公开资料','比较 ReAct 与计划执行的基本概念','查找 Vue 官方文档中的 TypeScript 说明']" :key="text" @click="input=text;textarea?.focus()"><span>{{['⌕','◇','↗'][i]}}</span>{{text}}<small>填入输入框 →</small></button></div><button v-if="!models.length" class="button primary" @click="view='settings'">连接模型服务</button></div><div v-else class="message-column"><button v-if="thread.hasMore" class="button history-more" :disabled="thread.loadingMore" @click="loadOlder">{{thread.loadingMore?'读取中…':'加载更早消息'}}</button><MessageBubble v-for="message in thread.messages" :key="message.id" :message="message" @inspect="inspection=message.result||undefined"/><div v-if="thread.running" class="run-progress" role="status"><span class="thinking-dots"><i/><i/><i/></span>{{thread.phase}}</div></div></div>
+        <div ref="messageBox" class="messages" @scroll.passive="trackScroll"><div v-if="loadingConversation" class="history-loading"><span class="loader"/>正在读取会话…</div><div v-else-if="!thread?.messages.length" class="welcome"><div class="welcome-mark">✳</div><h1>从一个问题开始。</h1><p>给 Agent 一个任务，观察它如何检索、核验和回答。</p><div class="suggestions"><button v-for="(text,i) in ['检索 ReAct 论文的公开资料','比较 ReAct 与计划执行的基本概念','查找 Vue 官方文档中的 TypeScript 说明']" :key="text" @click="input=text;textarea?.focus()"><span>{{['⌕','◇','↗'][i]}}</span>{{text}}<small>填入输入框 →</small></button></div><button v-if="!models.length" class="button primary" @click="view='settings'">连接模型服务</button></div><div v-else class="message-column"><button v-if="thread.hasMore" class="button history-more" :disabled="thread.loadingMore" @click="loadOlder">{{thread.loadingMore?'读取中…':'加载更早消息'}}</button><MessageBubble v-for="message in thread.messages" :key="message.id" :message="message" :busy="busy||checkpointBusy" @inspect="inspectMessage(message)" @checkpoint="inspectMessage(message,true)" @resume="resumeMessage(message)"/><div v-if="thread.running" class="run-progress" role="status"><span class="thinking-dots"><i/><i/><i/></span>{{thread.phase}}</div></div></div>
         <div class="composer-area"><button v-if="!atBottom" class="scroll-bottom" @click="atBottom=true;scroll(true)">↓ 回到最新消息</button><form class="composer" @submit.prevent="send"><textarea id="prompt" ref="textarea" v-model="input" maxlength="12000" rows="2" placeholder="输入任务或继续追问…" :disabled="busy" aria-label="任务输入" @keydown="keyboard" @input="resizeInput"/><div class="composer-bottom"><span class="composer-hint">↵ 发送 <span>· Shift + Enter 换行</span></span><button v-if="busy" type="button" class="button cancel-run" :disabled="!thread?.runId||thread?.cancelBusy" @click="cancelCurrentRun">{{thread?.cancelBusy?'取消中…':'停止任务'}}</button><button v-else class="send-button" :disabled="!canSend" aria-label="发送消息">{{busy?'◌':'↑'}}</button></div></form><p class="composer-note">会话自动保存 · 证据不足时调整查询，最多检索 3 轮</p></div>
       </section>
       <section v-else class="page-content"><div class="page-heading"><span class="eyebrow">WORKSPACE SETTINGS</span><h1>{{view==='settings'?'模型与连接':view==='tools'?'工具':'接口文档'}}</h1><p>{{view==='settings'?'配置连接，在对话区自由选择可用模型。':'通用能力，清晰的调用边界。'}}</p></div><template v-if="view==='settings'"><ModelSettings v-if="user.is_admin" :base-u-r-l="apiBase" @saved="saved"/><div v-else class="card settings-card"><h2>当前模型服务</h2><p>服务由管理员 user1 配置。你可以在对话框选择该服务的可用模型。</p><p>当前可用 {{models.length}} 个模型。</p></div><div class="card settings-card"><h2>后端连接</h2><label>API 地址<input v-model="apiBase" placeholder="同源留空；开发模式 /api"></label><p>更换后端后请重新登录对应服务。</p><button class="button" @click="clearSession">应用连接并重新登录</button></div></template><div v-else-if="view==='tools'" class="card settings-card"><span class="tool-symbol">⌕</span><h2>web_search</h2><p>{{tool?.description}}</p><div class="tool-facts"><span>{{runtime?.search_provider||'ddgs'}} · 无需搜索 Key</span><span>最多 3 轮证据核验</span><span>超时 {{tool?.timeout_seconds}}s</span></div><details><summary>输入 Schema</summary><pre>{{JSON.stringify(tool?.input_schema,null,2)}}</pre></details></div><div v-else class="card settings-card"><h2>接口文档</h2><p>登录和会话持久化、按用户隔离的历史、模型选择与增量响应。</p><a :href="apiBase.replace(/\/$/,'')+'/docs'" target="_blank" rel="noopener">打开 Swagger UI ↗</a><pre>POST /auth/login
@@ -114,7 +145,7 @@ GET /conversations/{id}
 GET /models
 POST /chat/stream</pre><p>详细说明见仓库 docs/api.md 与 docs/frontend.md。</p></div></section>
     </main>
-    <Transition name="drawer"><div v-if="inspection" class="inspector-backdrop" @click.self="inspection=undefined"><aside class="inspector"><header><div><span class="eyebrow">RUN DETAILS</span><h2>执行详情</h2></div><button aria-label="关闭执行详情" @click="inspection=undefined">×</button></header><div class="inspector-body"><span class="result-badge">{{inspection.success?'已完成':'执行失败'}}</span><p class="trace">{{inspection.trace_id}}</p><p>模型 {{inspection.model}} · {{inspection.latency_ms}}ms</p><p v-if="inspection.error" class="error-text">{{inspection.error}}</p><section v-for="round in inspection.rounds" :key="round.round" class="round-card"><div><strong>第 {{round.round}} 轮检索</strong><span :class="round.sufficient?'sufficient':'insufficient'">{{round.sufficient?'证据充分':'证据不足'}}</span></div><p>{{round.query}}</p><small>{{round.reason}}</small></section><details v-for="(step,index) in inspection.steps" :key="index" class="step"><summary>{{step.step_id}} · {{step.tool_name}} · {{step.status}}</summary><pre>{{JSON.stringify({params:step.params,result:step.result,error:step.error},null,2)}}</pre></details></div></aside></div></Transition>
+    <Transition name="drawer"><div v-if="inspection" class="inspector-backdrop" @click.self="inspection=undefined"><aside class="inspector"><header><div><span class="eyebrow">RUN DETAILS</span><h2>执行详情</h2></div><button aria-label="关闭执行详情" @click="inspection=undefined">×</button></header><div class="inspector-body"><p v-if="checkpointBusy">正在读取检查点…</p><section v-if="checkpointData" class="checkpoint-panel"><h3>持久检查点</h3><p>计划 v{{checkpointData.plan_version}} · 执行代次 {{checkpointData.generation}} · {{checkpointData.state}}</p><div v-for="node in checkpointData.steps" :key="node.version+node.key" class="checkpoint-node">{{node.key}} · {{node.status}}<small v-if="node.reused_from_version">复用 v{{node.reused_from_version}}</small></div><details><summary>尝试记录（{{checkpointData.attempts.length}}）</summary><p v-for="attempt in checkpointData.attempts" :key="attempt.id">{{attempt.step_key}} #{{attempt.number}} · {{attempt.status}}</p></details><details v-if="checkpointData.plan"><summary>修订依赖图 JSON</summary><p>修改会使相关步骤及下游失效；成功的独立分支可复用。</p><textarea v-model="graphDraft" rows="12" aria-label="依赖图 JSON" :disabled="checkpointBusy||['running','queued'].includes(checkpointData.state)"/><input v-model="revisionReason" placeholder="填写本次修订原因" aria-label="计划修订原因"><button class="button" :disabled="checkpointBusy||!revisionReason.trim()||['running','queued'].includes(checkpointData.state)" @click="saveGraph">保存新版本</button></details><button class="button primary" :disabled="busy||checkpointBusy||['running','queued'].includes(checkpointData.state)" @click="resumeInspected">从此检查点继续</button></section><span class="result-badge">{{inspection.success?'已完成':'执行失败'}}</span><p class="trace">{{inspection.trace_id}}</p><p>模型 {{inspection.model}} · {{inspection.latency_ms}}ms</p><p v-if="inspection.error" class="error-text">{{inspection.error}}</p><section v-for="round in inspection.rounds" :key="round.round" class="round-card"><div><strong>第 {{round.round}} 轮检索</strong><span :class="round.sufficient?'sufficient':'insufficient'">{{round.sufficient?'证据充分':'证据不足'}}</span></div><p>{{round.query}}</p><small>{{round.reason}}</small></section><details v-for="(step,index) in inspection.steps" :key="index" class="step"><summary>{{step.step_id}} · {{step.tool_name}} · {{step.status}}</summary><pre>{{JSON.stringify({params:step.params,result:step.result,error:step.error},null,2)}}</pre></details></div></aside></div></Transition>
     <Transition name="toast"><div v-if="toast" class="toast-message">✓ {{toast}}</div></Transition>
   </div>
 </template>

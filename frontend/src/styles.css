@@ -1232,3 +1232,9 @@ summary {
 
 .cancel-run { padding:7px 12px; font-size:11px; color:#98724b; }
 .degraded-notice { color:#9b773f; background:#faf3e7; padding:9px 12px; border-radius:8px; font-size:11px; }
+
+.checkpoint-panel { border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:20px; }
+.checkpoint-panel textarea,.checkpoint-panel input { width:100%;margin:12px 0;font-family:monospace; font-size:11px; }
+.checkpoint-panel details { margin:14px 0;font-size:12px; }
+.checkpoint-node { padding:8px 0;font-size:11px;overflow-wrap:anywhere; }
+.checkpoint-node small { display:block;color:#8ba277; }

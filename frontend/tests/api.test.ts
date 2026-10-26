@@ -71,3 +71,23 @@ describe('queue and cancellation UI',()=>{
     expect(wrapper.text()).toContain('队列已满');expect(wrapper.text()).toContain('5 秒后重试');wrapper.unmount()
   })
 })
+
+describe('durable recovery controls',()=>{
+  it('offers owner task inspection and resume for an interrupted message',async()=>{
+    const message={id:2,role:'assistant',content:'任务中断',status:'interrupted',created_at:1,result:null,checkpoint_available:true,run_id:'run-1',run_state:'interrupted'} as StoredMessage
+    const wrapper=mount(MessageBubble,{props:{message}})
+    const checkpoint=wrapper.findAll('button').find(b=>b.text()==='检查点')
+    const resume=wrapper.findAll('button').find(b=>b.text()==='从检查点继续')
+    await checkpoint?.trigger('click');await resume?.trigger('click')
+    expect(wrapper.emitted('checkpoint')).toHaveLength(1);expect(wrapper.emitted('resume')).toHaveLength(1)
+    await wrapper.setProps({busy:true});expect(resume?.attributes('disabled')).toBeDefined();wrapper.unmount()
+  })
+  it('sends generation and plan version comparisons without a client user identity',async()=>{
+    const fetcher=vi.fn().mockResolvedValue({ok:true,json:async()=>({})});vi.stubGlobal('fetch',fetcher)
+    const api=new AgentAPI('/api'),plan={intent_id:'web_search',steps:[]}
+    await api.resumeRun('run-1',3);await api.revisePlan('run-1',2,plan,'A needs B')
+    expect(JSON.parse(fetcher.mock.calls[0]?.[1].body)).toEqual({expected_generation:3})
+    expect(JSON.parse(fetcher.mock.calls[1]?.[1].body)).toEqual({expected_version:2,plan,reason:'A needs B'})
+    expect(fetcher.mock.calls[0]?.[1].credentials).toBe('include')
+  })
+})

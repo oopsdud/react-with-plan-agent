@@ -72,11 +72,14 @@ class ReActExecutor:
     async def execute(self, 
                       plan: Plan,
                       trace_id: str,
-                      session_context: Optional[Dict[str, Any]] = None) -> ExecutionContext:
+                      session_context: Optional[Dict[str, Any]] = None, checkpoint=None, targets=None, on_event=None) -> ExecutionContext:
         """
         执行计划
         ReAct模式：逐步执行，动态提取参数
         """
+        if checkpoint is not None:
+            from agent_system.runtime.durable_executor import execute_durable
+            return await execute_durable(self,plan,trace_id,session_context,checkpoint,targets,on_event)
         # 初始化执行上下文
         exec_ctx = ExecutionContext(
             trace_id=trace_id,
@@ -346,7 +349,7 @@ class ReActExecutor:
     async def _execute_step(self, 
                            step: PlanStep, 
                            plan: Plan,
-                           exec_ctx: ExecutionContext) -> StepResult:
+                           exec_ctx: ExecutionContext, prepared_params=None) -> StepResult:
         """
         执行单步（ReAct核心）
         动态提取参数 → 执行 → 观察
@@ -354,7 +357,7 @@ class ReActExecutor:
         start_time = time.time()
         
         # 1. 动态提取参数（ReAct关键）
-        params = await self._extract_params(step, plan, exec_ctx)
+        params = prepared_params if prepared_params is not None else await self._extract_params(step, plan, exec_ctx)
         
         # 2. 查找工具
         tool = self.tools.get(step.tool_name)
@@ -662,7 +665,7 @@ class ReActExecutor:
 async def execute_plan(plan: Plan, 
                       trace_id: str,
                       tools: Dict[str, Callable],
-                      session_context: Optional[Dict[str, Any]] = None) -> ExecutionContext:
+                      session_context: Optional[Dict[str, Any]] = None, checkpoint=None) -> ExecutionContext:
     """执行计划便捷函数"""
     executor = ReActExecutor(tools)
-    return await executor.execute(plan, trace_id, session_context)
+    return await executor.execute(plan, trace_id, session_context, checkpoint=checkpoint)

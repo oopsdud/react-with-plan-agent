@@ -96,6 +96,25 @@ The runtime now limits global execution (4 by default) plus an extra 32 in-fligh
 
 Use `GET /runs/{id}`, `POST /runs/{id}/cancel`, admin-only `GET /operations`, and `GET /ready`. Optional `client_request_id` prevents duplicate execution within a user; duplicates return 409 with the original run ID. Messages load through bounded cursor pagination. Upgrade by stopping old instances, backing up `data`, and restarting one worker; new lifecycle tables are added automatically. A local process lease rejects a second API process sharing that runtime directory.
 
-This remains **single process**, with bounded in-memory scheduling rather than a distributed durable queue. Restart marks unfinished tasks interrupted; it does not resume execution. Database persistence failure is reported rather than hidden. Capacity settings must be tuned against actual provider quotas and measured task duration; concurrency limits are not throughput guarantees.
+This remains **single process**, with bounded in-memory scheduling rather than a distributed durable queue. Restart marks unfinished tasks interrupted; recovery is manually requested from durable checkpoints for new tasks. Database persistence failure is reported rather than hidden. Capacity settings must be tuned against actual provider quotas and measured task duration; concurrency limits are not throughput guarantees.
 
-If persistence fails, the API reports an error and the database run lock may remain. Restore database availability, ensure the old process has stopped, then restart one instance to mark unfinished runs interrupted and release conversations. Execution does not automatically resume after a crash, and results cannot be guaranteed during a database outage. HTTP failures expose stable error codes, request IDs, and Retry-After when applicable; see the [API contract](docs/api.md).
+If persistence fails, the API reports an error and the database run lock may remain. Restore database availability, ensure the old process has stopped, then restart one instance to mark unfinished runs interrupted and release conversations. Execution does not automatically restart after a crash; manual checkpoint recovery is available for new tasks, and results cannot be guaranteed during a database outage. HTTP failures expose stable error codes, request IDs, and Retry-After when applicable; see the [API contract](docs/api.md).
+
+
+## Durable checkpoints and selective recovery (0.5)
+
+| Capability | Current behavior |
+| --- | --- |
+| Durable steps | SQLite stores step state, resolved arguments, results, and individual attempts; completed branches are saved immediately |
+| Versioned dependency graphs | Each revision creates an immutable version; changed nodes and transitive descendants are invalidated while valid successful results are reused |
+| Selective recovery | Dependency-ready nodes execute using valid cached results; execution generations fence stale writers |
+
+New tasks persist each step and attempt, plus routing/review/answer stage checkpoints. Use the message checkpoint panel to inspect versions and attempts, edit a dependency graph, and resume. Successful unchanged branches are reused; changed nodes and their transitive descendants are invalidated. Dependency-ready nodes start without waiting for unrelated slow branches.
+
+For example, if A/B/C initially run in parallel and A fails while B/C succeed, revise A to depend on B and reference its result. Save the new version, then resume: B/C are reused and only A runs again. Missing dependencies require an explicit revision; the framework does not infer them automatically. Recovery updates the original assistant message without inserting the user question again. Restarting also requires an explicit resume request.
+
+Checkpoint defaults in `.env.example` allow 64 graph nodes, 12 plan versions, 5 resumes, 6 cumulative attempts per step, 4 parallel step slots, and 2,000,000 bytes per checkpoint JSON value. Chat retains its stricter cumulative limit of three search calls across revisions and resumes.
+
+Owner-scoped APIs: `GET /runs/{id}/checkpoint`, `POST /runs/{id}/resume` with `expected_generation`, `POST /runs/{id}/plan/revisions` with `expected_version`, and `POST /runs/graph` for an explicit plan using registered tools. A new execution generation fences stale writers. Recovery keeps original input/history and accumulated budgets; chat still allows at most three search attempts. Unknown side-effecting calls are not automatically replayed. Legacy tasks without durable state, older turns with subsequent messages, and incompatible configuration cannot be resumed.
+
+Recovery re-executes unfinished steps rather than restoring a Python stack or continuing a partial token stream. It is manually requested, not a distributed worker takeover. Keep one API worker, stop old processes and back up data before upgrading; new tables are additive. See [checkpoint documentation](docs/checkpoints.md) for schema, examples, limits and failure semantics.

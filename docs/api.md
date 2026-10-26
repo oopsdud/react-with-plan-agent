@@ -75,7 +75,7 @@
 {"type":"done","result":{"完整字段":"同 /chat"}}
 ```
 
-空闲约 10 秒发送 `{"type":"heartbeat"}`。`done.result` 是最终权威结果，并已持久化；流程失败可通过 `done.result.success=false` 表达。保存等异常会发送 `type=error,message`；没有 done 的 EOF 视作流中断。浏览器断开后任务继续执行并保存，可 GET 会话恢复，不会自动取消。同一会话重复执行返回 409，独立会话互不阻塞。后端重启将 pending 轮次标为 interrupted；不是断点恢复。可通过 `/runs/{id}/cancel` 取消自己的任务。
+空闲约 10 秒发送 `{"type":"heartbeat"}`。`done.result` 是最终权威结果，并已持久化；流程失败可通过 `done.result.success=false` 表达。保存等异常会发送 `type=error,message`；没有 done 的 EOF 视作流中断。浏览器断开后任务继续执行并保存，可 GET 会话恢复，不会自动取消。同一会话重复执行返回 409，独立会话互不阻塞。后端重启将 pending 轮次标为 interrupted；新任务可随后从持久检查点手动恢复。可通过 `/runs/{id}/cancel` 取消自己的任务。
 
 ## 模型配置
 
@@ -114,3 +114,12 @@
 NDJSON start 增加 run_id，后续 status.phase 可为 queued/degraded。单客户端缓存默认 128 个事件；过慢时发 error/code=SLOW_CONSUMER 并结束推送，后台结果仍持久化，可刷新读取。此时不能推断任务被取消。
 
 默认执行 4 个任务，额外在途 32；每用户执行 1、额外在途 3。排队 60 秒、执行 180 秒截止，依赖连续失败 3 次熔断 30 秒。具体配置见 `.env.example`。数据库写入失败时可能保留运行锁；恢复数据库后，确认旧进程已停止，再重启单实例恢复中断状态。当前不保证崩溃后续跑或数据库故障期间结果不丢失。
+
+
+## 0.5 持久检查点与版本化依赖图
+
+普通聊天自动保存步骤与尝试。新增 owner-scoped 接口：GET `/runs/{id}/checkpoint`（默认元数据，include_results=true 返回本人的参数/结果）、POST `/runs/{id}/resume`（expected_generation）、POST `/runs/{id}/plan/revisions`（expected_version、reason、完整 plan）、POST `/runs/graph`（显式计划及 user_input/可选会话模型）。恢复及图提交返回 202；运行中不能改图，旧版本或代次返回 409。
+
+ChatResult 增加 plan_version 和 checkpoint_generation。会话消息增加 run_id、run_state、checkpoint_available 等恢复元数据。默认聊天和显式图都使用原有容量、取消与超时机制。恢复复用有效成功步骤，改图使变化节点和下游失效，不会重新执行独立成功分支。启动将不确定尝试标为 unknown；只有声明可重放的只读工具可以自动再执行，外部副作用未知时阻止重放。
+
+常见新增错误码：CHECKPOINT_NOT_FOUND、STALE_EXECUTION、PLAN_VERSION_CONFLICT、RESUME_CONFLICT、RESUME_NOT_LATEST_TURN、MODEL_CONFIG_CHANGED、STEP_OUTCOME_UNKNOWN、STEP_BUDGET_EXHAUSTED、SEARCH_BUDGET_EXHAUSTED。旧任务没有检查点时不可追溯恢复。详细请求示例和预算见 [检查点接口](checkpoints.md)。

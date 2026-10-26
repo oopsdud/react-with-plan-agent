@@ -2,7 +2,7 @@
 规划模块 - 骨架规划（ReAct-with-Plan）
 """
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 import uuid
 
 from agent_system.utils.llm_client import get_llm_client, BaseLLMClient
@@ -10,6 +10,7 @@ from agent_system.utils.embedding_client import get_embedding_client, BaseEmbedd
 
 
 class PlanStep(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     """计划步骤（仅骨架，参数占位符）"""
     step_id: int = Field(..., description="步骤序号")
     tool_name: str = Field(..., description="工具名")
@@ -20,6 +21,7 @@ class PlanStep(BaseModel):
 
 
 class Plan(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     """计划（骨架）"""
     plan_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     intent_id: str = Field(..., description="意图ID")

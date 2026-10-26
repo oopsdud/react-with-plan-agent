@@ -9,7 +9,7 @@ export interface StepResult {
 }
 export interface Source { title: string; url: string; content: string; score: number | null }
 export interface ChatResult {
-  run_id?:string; run_state?:string; degraded?:boolean; queue_wait_ms?:number; error_info?:{code:string;message:string;retryable:boolean}; conversation_id?:string; message_id?:number; model?:string; rounds?:ResearchRound[]; evidence_sufficient?:boolean|null; trace_id: string; success: boolean; answer: string | null; intent: Intent | null
+  plan_version?:number; checkpoint_generation?:number; run_id?:string; run_state?:string; degraded?:boolean; queue_wait_ms?:number; error_info?:{code:string;message:string;retryable:boolean}; conversation_id?:string; message_id?:number; model?:string; rounds?:ResearchRound[]; evidence_sufficient?:boolean|null; trace_id: string; success: boolean; answer: string | null; intent: Intent | null
   steps: StepResult[]; latency_ms: number; error: string | null; sources: Source[]
 }
 export interface RuntimeInfo {
@@ -27,10 +27,18 @@ export interface ModelSave extends ModelConnection { model: string; json_mode: b
 
 export interface User { id:string; username:string; is_admin:boolean }
 export interface Conversation { id:string; title:string; model:string|null; updated_at:number; running:boolean; run_id?:string|null }
-export interface StoredMessage { id:number; role:'user'|'assistant'; content:string; model:string|null; status:string; result:ChatResult|null; created_at:number }
+export interface StoredMessage { run_id?:string; run_state?:string; checkpoint_available?:boolean; checkpoint_generation?:number; plan_version?:number; id:number; role:'user'|'assistant'; content:string; model:string|null; status:string; result:ChatResult|null; created_at:number }
 export interface ConversationDetail extends Conversation { messages:StoredMessage[]; has_more?:boolean; next_before_id?:number|null }
 export interface ResearchRound { round:number; query:string; sufficient:boolean; reason:string; next_query:string }
 export interface StreamEvent {
   run_id?:string; code?:string; type:string; content?:string; message?:string; phase?:string; round?:number; query?:string; sufficient?:boolean; reason?:string
   conversation_id?:string; message_id?:number; result?:ChatResult; step?:StepResult; intent?:Intent
+}
+
+export interface CheckpointView {
+  run_id:string; generation:number; plan_version:number; state:string; resume_count:number; mode:string; model:string
+  plan:Record<string,unknown>|null
+  revisions:{version:number;reason:string;invalidated_steps:number[];created_at:number}[]
+  steps:{version:number;key:string;status:string;reused_from_version:number|null}[]
+  attempts:{id:string;step_key:string;number:number;generation:number;status:string;tool_name:string}[]
 }

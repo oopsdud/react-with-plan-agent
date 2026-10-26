@@ -1,4 +1,4 @@
-import type { ChatResult, Intent, RuntimeInfo, ToolInfo, ModelConfig, ModelConnection, ModelSave, User, Conversation, ConversationDetail, StreamEvent } from './types'
+import type { ChatResult, Intent, RuntimeInfo, ToolInfo, ModelConfig, ModelConnection, ModelSave, User, Conversation, ConversationDetail, StreamEvent, CheckpointView } from './types'
 export const defaultBaseURL=import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV?'/api':'')
 export function safeURL(value:string):string|null {try{const url=new URL(value);return ['http:','https:'].includes(url.protocol)?url.href:null}catch{return null}}
 export class APIError extends Error { constructor(message:string,readonly status:number,readonly code?:string,readonly requestId?:string,readonly retryAfter?:number){super(message)} }
@@ -22,6 +22,9 @@ export class AgentAPI {
   createConversation(){return this.request<Conversation>('/conversations',{})}
   conversation(id:string,beforeId?:number){return this.request<ConversationDetail>(`/conversations/${encodeURIComponent(id)}${beforeId?`?before_id=${beforeId}`:''}`)}
   deleteConversation(id:string){return this.request(`/conversations/${encodeURIComponent(id)}`,undefined,'DELETE')}
+  checkpoint(id:string){return this.request<CheckpointView>(`/runs/${encodeURIComponent(id)}/checkpoint`)}
+  resumeRun(id:string,generation:number){return this.request(`/runs/${encodeURIComponent(id)}/resume`,{expected_generation:generation})}
+  revisePlan(id:string,version:number,plan:Record<string,unknown>,reason:string){return this.request(`/runs/${encodeURIComponent(id)}/plan/revisions`,{expected_version:version,plan,reason})}
   cancelRun(id:string){return this.request(`/runs/${encodeURIComponent(id)}/cancel`,{})}
   run(id:string){return this.request<{id:string;state:string}>(`/runs/${encodeURIComponent(id)}`)}
   catalog(){return this.request<{models:string[];default_model:string}>('/models')}

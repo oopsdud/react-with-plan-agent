@@ -22,6 +22,8 @@ class ToolResult(BaseModel):
 
 
 class BaseTool:
+    replay_safe = False
+    checkpoint_version = '1'
     def __init__(self, name: str, description: str):
         self.name = name
         self.description = description
@@ -53,6 +55,8 @@ class BaseTool:
 
 
 class WebSearchTool(BaseTool):
+    # Public read-only retrieval may be repeated after an unknown crash outcome.
+    replay_safe = True
     def __init__(self, transport: Optional[httpx.AsyncBaseTransport] = None):
         super().__init__('web_search', '搜索互联网网页，返回标题、链接和内容摘要；用于获取和核实公开信息。')
         self.transport = transport

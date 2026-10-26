@@ -166,3 +166,57 @@ class RequestDedup(Base):
     fingerprint = Column(String(64), nullable=False)
     run_id = Column(String(64), ForeignKey('agent_runs.id'), nullable=False, index=True)
     expires_at = Column(Float, nullable=False, index=True)
+
+# Durable execution tables are additive; legacy task_checkpoints remains untouched.
+class RunCheckpoint(Base):
+    __tablename__ = 'run_checkpoints'
+    run_id = Column(String(64), ForeignKey('agent_runs.id'), primary_key=True)
+    user_id = Column(String(64), ForeignKey('users.id'), nullable=False, index=True)
+    generation = Column(Integer, nullable=False, default=1)
+    head_version = Column(Integer, nullable=False, default=0)
+    status = Column(String(24), nullable=False, default='queued')
+    resume_count = Column(Integer, nullable=False, default=0)
+    model_identity = Column(String(64), nullable=False)
+    state = Column(JSON, nullable=False)
+    updated_at = Column(Float, nullable=False)
+
+
+class PlanRevision(Base):
+    __tablename__ = 'plan_revisions'
+    run_id = Column(String(64), ForeignKey('agent_runs.id'), primary_key=True)
+    version = Column(Integer, primary_key=True)
+    definition = Column(JSON, nullable=False)
+    reason = Column(String(1000), nullable=False)
+    invalidated_steps = Column(JSON, nullable=False, default=list)
+    created_at = Column(Float, nullable=False)
+
+
+class StepCheckpoint(Base):
+    __tablename__ = 'step_checkpoints'
+    run_id = Column(String(64), ForeignKey('agent_runs.id'), primary_key=True)
+    version = Column(Integer, primary_key=True)
+    step_key = Column(String(100), primary_key=True)
+    status = Column(String(24), nullable=False)
+    input_hash = Column(String(64), nullable=False, default='')
+    result = Column(JSON, nullable=True)
+    error = Column(JSON, nullable=True)
+    reused_from_version = Column(Integer, nullable=True)
+    updated_at = Column(Float, nullable=False)
+
+
+class StepAttempt(Base):
+    __tablename__ = 'step_attempts'
+    id = Column(String(64), primary_key=True)
+    run_id = Column(String(64), ForeignKey('agent_runs.id'), nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    step_key = Column(String(100), nullable=False, index=True)
+    number = Column(Integer, nullable=False)
+    generation = Column(Integer, nullable=False)
+    tool_name = Column(String(100), nullable=False)
+    replay_safe = Column(Boolean, nullable=False, default=False)
+    status = Column(String(24), nullable=False)
+    params = Column(JSON, nullable=False)
+    result = Column(JSON, nullable=True)
+    error = Column(JSON, nullable=True)
+    started_at = Column(Float, nullable=False)
+    finished_at = Column(Float, nullable=True)

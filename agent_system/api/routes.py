@@ -30,6 +30,9 @@ from agent_system.api.model_settings import router as model_router, available_mo
 from agent_system.runtime import get_runtime
 from agent_system.runtime.errors import ServiceError, public_error
 from agent_system.runtime.process_lease import ProcessLease
+from agent_system.runtime.checkpoints import Checkpoint,model_identity,inspect_checkpoint,claim_resume,revise_plan,validate_graph,execution_progress
+from agent_system.core.planner import Plan
+from agent_system.db.models import RunCheckpoint
 
 logger=logging.getLogger(__name__)
 
@@ -55,7 +58,7 @@ async def lifespan(app):
             runtime.search_threads.close()
             lease.release()
 
-app=FastAPI(title='Agent System',description='ReAct-with-Plan 智能体框架',version='0.4.0',lifespan=lifespan)
+app=FastAPI(title='Agent System',description='ReAct-with-Plan 智能体框架',version='0.5.0',lifespan=lifespan)
 app.add_middleware(CORSMiddleware,allow_origins=get_settings().CORS_ORIGINS,allow_credentials=True,
     allow_methods=['GET','POST','PUT','DELETE'],allow_headers=['Content-Type'],expose_headers=['X-Request-ID','Retry-After'])
 app.include_router(auth_router)
@@ -142,9 +145,11 @@ class ChatResponse(BaseModel):
     error_info:Optional[dict[str,Any]]=None
     degraded:bool=False
     queue_wait_ms:int=0
+    plan_version:int=0
+    checkpoint_generation:int=1
 
 @app.get('/')
-def root():return {'name':'Agent System','version':'0.4.0','status':'running'}
+def root():return {'name':'Agent System','version':'0.5.0','status':'running'}
 
 @app.get('/health')
 async def health():return {'status':'healthy'}
@@ -161,7 +166,7 @@ async def ready():
 @app.get('/runtime')
 def runtime(user=Depends(require_user)):
     settings=get_settings()
-    return {'version':'0.4.0','llm_mode':'api','llm_model':settings.LLM_MODEL,'llm_configured':credential_configured(settings.LLM_API_KEY) and credential_configured(settings.LLM_MODEL),
+    return {'version':'0.5.0','llm_mode':'api','llm_model':settings.LLM_MODEL,'llm_configured':credential_configured(settings.LLM_API_KEY) and credential_configured(settings.LLM_MODEL),
         'search_provider':settings.SEARCH_PROVIDER,'search_configured':search_configured(settings),'tools_mode':'live','streaming':True,'max_search_rounds':3}
 
 @app.get('/operations')
@@ -191,7 +196,7 @@ def failure_result(error,run_id,state='failed'):
     return {'success':False,'answer':info['message'],'error':info['message'],'error_info':info,
         'trace_id':run_id,'intent':None,'steps':[],'sources':[],'latency_ms':0,'run_state':state}
 
-async def prepare(request,user):
+async def prepare(request,user,mode='chat',plan_snapshot=None):
     if request.conversation_id:
         def check_owner():
             with db_session() as db:owned(db,request.conversation_id,user.id)
@@ -207,8 +212,10 @@ async def prepare(request,user):
         if request.model and selected not in await available_models(settings):raise HTTPException(422,'所选模型不可用，请刷新模型列表。')
         # Snapshot credentials before queueing. Later admin changes affect new submissions only.
         llm=OpenAIClient(api_key=settings.LLM_API_KEY,base_url=settings.LLM_BASE_URL or 'https://api.openai.com/v1',model=selected,settings_snapshot=settings)
-        fingerprint=hashlib.sha256(json.dumps(request.model_dump(exclude={'client_request_id'}),sort_keys=True,ensure_ascii=False).encode()).hexdigest()
-        reserving=asyncio.create_task(asyncio.to_thread(reserve_turn,user.id,request.conversation_id,request.user_input,selected,request.client_request_id,fingerprint))
+        material=request.model_dump(exclude={'client_request_id'})
+        if plan_snapshot is not None:material['plan']={k:v for k,v in plan_snapshot.items() if k!='plan_id'}
+        fingerprint=hashlib.sha256(json.dumps(material,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+        reserving=asyncio.create_task(asyncio.to_thread(reserve_turn,user.id,request.conversation_id,request.user_input,selected,request.client_request_id,fingerprint,{'identity':model_identity(settings,selected),'mode':mode,'initial_plan':plan_snapshot}))
         reservation=await asyncio.shield(reserving)
         return selected,reservation,ticket,llm
     except BaseException:
@@ -236,16 +243,18 @@ async def execute_turn(request,user_id,selected,reservation,ticket,llm,on_event=
     result=None
     queued_at=time.monotonic()
     wait_ms=0
+    generation=getattr(ticket,'checkpoint_generation',1)
+    checkpoint=Checkpoint(run_id,user_id,generation)
     if control:control.started=True
     try:
         if control and control.cancel_requested:raise asyncio.CancelledError
         if on_event:await on_event({'type':'status','phase':'queued','message':'任务已受理，等待执行配额','run_id':run_id})
         await runtime.scheduler.wait(ticket)
         wait_ms=int((time.monotonic()-queued_at)*1000)
-        if not await asyncio.to_thread(mark_running,run_id):
+        if not await asyncio.to_thread(mark_running,run_id,generation):
             raise ServiceError('STALE_RUN','任务状态已改变，停止执行。',409)
         async with asyncio.timeout(runtime.scheduler.settings.AGENT_RUN_TIMEOUT_SECONDS):
-            result=await run_agent(user_input=request.user_input,user_id=user_id,session_history=history,model=selected,on_event=on_event,llm_client=llm)
+            result=await run_agent(user_input=request.user_input,user_id=user_id,session_history=history,model=selected,on_event=on_event,llm_client=llm,checkpoint=checkpoint)
     except asyncio.CancelledError:
         result=failure_result(ServiceError('SHUTDOWN_INTERRUPTED','服务关闭，任务已中断。',503,True,5),run_id,'interrupted') if runtime.scheduler.closing else failure_result(ServiceError('RUN_CANCELLED','任务已取消。',409),run_id,'cancelled')
     except TimeoutError:
@@ -256,9 +265,14 @@ async def execute_turn(request,user_id,selected,reservation,ticket,llm,on_event=
     if result and result.get('latency_ms')==0:result['latency_ms']=max(0,int((time.monotonic()-queued_at)*1000)-wait_ms)
     if control:control.finishing=True
     try:
+        snapshot=await checkpoint.io(execution_progress,run_id,user_id)
+        result['plan_version']=snapshot['plan_version']
+        result['checkpoint_generation']=generation
+        durable_steps=snapshot['steps']
+        if durable_steps:result['steps']=sorted({step['step_id']:step for step in [*durable_steps,*result.get('steps',[])]}.values(),key=lambda step:step['step_id'])
         result.update(conversation_id=conversation_id,message_id=message_id,model=selected,run_id=run_id,queue_wait_ms=wait_ms)
         result.setdefault('run_state','succeeded' if result.get('success') else 'failed')
-        saving=asyncio.create_task(asyncio.to_thread(finish_turn,conversation_id,message_id,run_id,result))
+        saving=asyncio.create_task(asyncio.to_thread(finish_turn,conversation_id,message_id,run_id,result,generation))
         try:saved=await asyncio.shield(saving)
         except asyncio.CancelledError:saved=await asyncio.shield(saving)
         if not saved:raise ServiceError('STALE_RUN','任务执行标识已失效，结果未覆盖现有会话。',409)
@@ -365,6 +379,73 @@ async def intent(request:ChatRequest,user=Depends(require_user)):
             return (await router.route(request.user_input,history)).model_dump()
     except TimeoutError:raise ServiceError('RUN_TIMEOUT','意图识别超时。',504,True,5) from None
     finally:scheduler.release(ticket)
+
+class RevisionRequest(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    expected_version:int=Field(ge=0)
+    reason:str=Field(min_length=1,max_length=1000)
+    plan:Plan
+
+class ResumeRequest(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    expected_generation:int=Field(ge=1)
+
+class GraphRequest(ChatRequest):
+    plan:Plan
+
+@app.get('/runs/{run_id}/checkpoint')
+async def read_checkpoint(run_id:str,include_results:bool=False,user=Depends(require_user)):
+    return await asyncio.to_thread(inspect_checkpoint,run_id,user.id,include_results)
+
+@app.post('/runs/{run_id}/plan/revisions')
+async def revise_run_plan(run_id:str,request:RevisionRequest,user=Depends(require_user)):
+    version=await asyncio.to_thread(revise_plan,run_id,user.id,request.plan,request.expected_version,request.reason,get_tool_registry().list_tools())
+    return {'run_id':run_id,'plan_version':version,'state':'needs_resume'}
+
+@app.post('/runs/{run_id}/resume',status_code=202)
+async def resume_run(run_id:str,request:ResumeRequest,user=Depends(require_user)):
+    def owner_state():
+        with db_session() as db:
+            root=db.query(RunCheckpoint).filter_by(run_id=run_id,user_id=user.id).first()
+            if root is None:raise HTTPException(404,'没有可恢复的检查点。')
+            return dict(root.state)
+    state=await asyncio.to_thread(owner_state)
+    if run_id in get_runtime().runs:raise ServiceError('RUN_BUSY','该任务仍在执行或提交结果。',409)
+    settings=get_settings()
+    if not credential_configured(settings.LLM_API_KEY):raise HTTPException(422,'请先配置模型连接。')
+    ticket=get_runtime().scheduler.admit(user.id)
+    reservation=None
+    claiming=None
+    try:
+        llm=OpenAIClient(api_key=settings.LLM_API_KEY,base_url=settings.LLM_BASE_URL or 'https://api.openai.com/v1',model=state['model'],settings_snapshot=settings)
+        claiming=asyncio.create_task(asyncio.to_thread(claim_resume,run_id,user.id,request.expected_generation,model_identity(settings,state['model'])))
+        reservation,generation,state=await asyncio.shield(claiming)
+        ticket.checkpoint_generation=generation
+        payload=ChatRequest(user_input=state['user_input'],conversation_id=reservation[0],model=state['model'])
+        launch(payload,user.id,(state['model'],reservation,ticket,llm))
+        return {'run_id':run_id,'state':'queued','generation':generation,'conversation_id':reservation[0]}
+    except BaseException:
+        try:
+            if claiming and reservation is None:
+                try:reservation,generation,state=await asyncio.shield(claiming)
+                except Exception:pass
+            if reservation:
+                await asyncio.to_thread(finish_turn,*reservation[:3],failure_result(ServiceError('REQUEST_CANCELLED','恢复请求已中断。',409),run_id,'cancelled'),generation)
+        finally:get_runtime().scheduler.release(ticket)
+        raise
+
+@app.post('/runs/graph',status_code=202)
+async def submit_graph(request:GraphRequest,user=Depends(require_user)):
+    validate_graph(request.plan,get_tool_registry().list_tools())
+    payload=ChatRequest.model_validate(request.model_dump(exclude={'plan'}))
+    prepared=await prepare(payload,user,mode='graph',plan_snapshot=request.plan.model_dump())
+    try:
+        launch(payload,user.id,prepared)
+        return {'run_id':prepared[1][2],'conversation_id':prepared[1][0],'state':'queued','generation':1}
+    except BaseException:
+        try:await asyncio.to_thread(finish_turn,*prepared[1][:3],failure_result(ServiceError('GRAPH_SUBMIT_FAILED','依赖图提交失败。',409),prepared[1][2]))
+        finally:get_runtime().scheduler.release(prepared[2])
+        raise
 
 FRONTEND_DIST=Path(__file__).resolve().parents[2]/'frontend'/'dist'
 @app.get('/console/',include_in_schema=False)

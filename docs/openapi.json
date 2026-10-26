@@ -3,7 +3,7 @@
   "info": {
     "title": "Agent System",
     "description": "ReAct-with-Plan 智能体框架",
-    "version": "0.4.0"
+    "version": "0.5.0"
   },
   "paths": {
     "/auth/login": {
@@ -693,6 +693,183 @@
           }
         }
       }
+    },
+    "/runs/{run_id}/checkpoint": {
+      "get": {
+        "summary": "Read Checkpoint",
+        "operationId": "read_checkpoint_runs__run_id__checkpoint_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "include_results",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Results"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/plan/revisions": {
+      "post": {
+        "summary": "Revise Run Plan",
+        "operationId": "revise_run_plan_runs__run_id__plan_revisions_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/resume": {
+      "post": {
+        "summary": "Resume Run",
+        "operationId": "resume_run_runs__run_id__resume_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/graph": {
+      "post": {
+        "summary": "Submit Graph",
+        "operationId": "submit_graph_runs_graph_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -896,6 +1073,16 @@
             "type": "integer",
             "title": "Queue Wait Ms",
             "default": 0
+          },
+          "plan_version": {
+            "type": "integer",
+            "title": "Plan Version",
+            "default": 0
+          },
+          "checkpoint_generation": {
+            "type": "integer",
+            "title": "Checkpoint Generation",
+            "default": 1
           }
         },
         "type": "object",
@@ -924,6 +1111,64 @@
         },
         "type": "object",
         "title": "ConversationCreate"
+      },
+      "GraphRequest": {
+        "properties": {
+          "user_input": {
+            "type": "string",
+            "maxLength": 12000,
+            "minLength": 1,
+            "title": "User Input"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "client_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Request Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/Plan"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_input",
+          "plan"
+        ],
+        "title": "GraphRequest"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1073,6 +1318,139 @@
           "model"
         ],
         "title": "ModelSave"
+      },
+      "Plan": {
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "intent_id": {
+            "type": "string",
+            "title": "Intent Id",
+            "description": "意图ID"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "type": "array",
+            "title": "Steps",
+            "description": "步骤列表"
+          },
+          "extracted_slots": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Extracted Slots",
+            "description": "预提取槽位"
+          },
+          "has_parallel": {
+            "type": "boolean",
+            "title": "Has Parallel",
+            "description": "是否有并行步骤",
+            "default": false
+          },
+          "max_depth": {
+            "type": "integer",
+            "title": "Max Depth",
+            "description": "DAG最大深度",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "intent_id"
+        ],
+        "title": "Plan"
+      },
+      "PlanStep": {
+        "properties": {
+          "step_id": {
+            "type": "integer",
+            "title": "Step Id",
+            "description": "步骤序号"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name",
+            "description": "工具名"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "步骤描述",
+            "default": ""
+          },
+          "params_template": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params Template",
+            "description": "参数模板（含占位符）"
+          },
+          "depends_on": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Depends On",
+            "description": "依赖的步骤ID列表"
+          },
+          "is_critical": {
+            "type": "boolean",
+            "title": "Is Critical",
+            "description": "失败或被阻塞时影响任务整体结果；独立分支继续执行",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "step_id",
+          "tool_name"
+        ],
+        "title": "PlanStep"
+      },
+      "ResumeRequest": {
+        "properties": {
+          "expected_generation": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Generation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_generation"
+        ],
+        "title": "ResumeRequest"
+      },
+      "RevisionRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/Plan"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version",
+          "reason",
+          "plan"
+        ],
+        "title": "RevisionRequest"
       },
       "ValidationError": {
         "properties": {
